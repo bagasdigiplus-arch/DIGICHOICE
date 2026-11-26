@@ -2,8 +2,18 @@
 
 import React, { useMemo, useState } from "react";
 import {
-  Banknote, Calculator, Check, Copy, CreditCard,
-  Minus, Plus, RefreshCw, ScanBarcode, ShieldCheck, ShoppingCart, Trash2,
+  Banknote,
+  Calculator,
+  Check,
+  Copy,
+  CreditCard,
+  Minus,
+  Plus,
+  RefreshCw,
+  ScanBarcode,
+  ShieldCheck,
+  ShoppingCart,
+  Trash2,
 } from "lucide-react";
 
 interface PaymentSimulatorViewProps {
@@ -120,9 +130,15 @@ export default function PaymentSimulatorView({
       (b: any, idx: number) =>
         String(b.Bank_ID || b.Promo_ID || b.Nama_Bank || idx) === id
     );
-    if (!found) return setManualBankDiscount(0);
+    if (!found) {
+      setManualBankDiscount(0);
+      return;
+    }
     const explicit = Number(found.Nominal_Diskon || found.Cashback || 0);
-    if (explicit > 0) return setManualBankDiscount(explicit);
+    if (explicit > 0) {
+      setManualBankDiscount(explicit);
+      return;
+    }
     const match = String(found.Catatan_Promo || "").match(/(\d{1,3}(?:\.\d{3})+)/);
     setManualBankDiscount(match ? Number(match[1].replace(/\./g, "")) : 0);
   };
@@ -269,4 +285,158 @@ export default function PaymentSimulatorView({
         <details className="pt-2 border-t border-slate-200 dark:border-slate-800">
           <summary className="text-xs font-semibold text-slate-500 cursor-pointer">+ Input Item Manual</summary>
           <div className="mt-2 grid grid-cols-2 gap-2">
-            <input type="text" placeholder="Nama Item" value={manualName} onChange={(e) => setManualName(e.target.value)} className="col-span-2 rounded-lg bg-slate-100 dark:
+            <input type="text" placeholder="Nama Item" value={manualName} onChange={(e) => setManualName(e.target.value)} className="col-span-2 rounded-lg bg-slate-100 dark:bg-slate-800 px-3 py-1.5 text-xs" />
+            <input type="text" placeholder="SKU" value={manualSku} onChange={(e) => setManualSku(e.target.value)} className="rounded-lg bg-slate-100 dark:bg-slate-800 px-3 py-1.5 text-xs" />
+            <input type="number" placeholder="Harga" value={manualPrice || ""} onChange={(e) => setManualPrice(Number(e.target.value))} className="rounded-lg bg-slate-100 dark:bg-slate-800 px-3 py-1.5 text-xs" />
+            <button type="button" onClick={() => { if (manualName && manualPrice > 0) { onAddManualItem(manualName, manualSku || "MANUAL", manualPrice); setManualName(""); setManualSku(""); setManualPrice(0); } }} className="col-span-2 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-bold">Simpan Item</button>
+          </div>
+        </details>
+      </div>
+
+      {/* ZONA 2: TRADE-IN LAKU6, PROMO & SKEMA CICILAN */}
+      <div className="xl:col-span-4 space-y-4">
+        <div className="bg-white dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm space-y-3">
+          <div className="flex items-center gap-2">
+            <RefreshCw className="w-4 h-4 text-emerald-500" />
+            <h3 className="text-sm font-extrabold">2A. Trade-In Laku6</h3>
+          </div>
+          <select value={selectedTradeInId} onChange={(e) => handleSelectTradeIn(e.target.value)} className="w-full rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-3 py-2 text-xs font-medium">
+            <option value="">-- Tanpa Trade-In --</option>
+            {tradeInDevices.map((t: any, idx: number) => {
+              const key = String(t.TradeIn_ID || t.Tipe_Device_Lama || t.Model_Lama || idx);
+              const label = t.Tipe_Device_Lama || t.Model_Lama || t.Model || `Device Lama #${idx + 1}`;
+              const estA = Number(t.Harga_Grade_A ?? t.Estimasi_Buyback ?? 0);
+              return <option key={key} value={key}>{label} {estA > 0 ? `(Est. ${formatIDR(estA)})` : ""}</option>;
+            })}
+          </select>
+
+          {selectedTradeIn && (
+            <div className="space-y-2">
+              <div className="grid grid-cols-3 gap-1.5">
+                {(["A", "B", "C"] as const).map((g) => (
+                  <button key={g} type="button" onClick={() => setTradeInGrade(g)} className={`py-1.5 rounded-lg text-xs font-bold border ${tradeInGrade === g ? "bg-emerald-600 text-white border-emerald-600" : "bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700"}`}>
+                    Grade {g}
+                  </button>
+                ))}
+              </div>
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-slate-500">Top-Up Bonus:</span>
+                <input type="number" step={100000} value={tradeInBonus || ""} onChange={(e) => setTradeInBonus(Number(e.target.value))} className="w-32 rounded-lg bg-slate-100 dark:bg-slate-800 px-2.5 py-1 text-right font-semibold" />
+              </div>
+              <div className="p-2.5 rounded-xl bg-emerald-500/10 flex justify-between text-xs font-bold text-emerald-500">
+                <span>Potongan Buyback:</span>
+                <span>-{formatIDR(tradeInValue)}</span>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="bg-white dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm space-y-3">
+          <div className="flex items-center gap-2">
+            <Banknote className="w-4 h-4 text-blue-500" />
+            <h3 className="text-sm font-extrabold">2B. Promo Bank, Voucher &amp; MAPCLUB</h3>
+          </div>
+          <select value={selectedBankId} onChange={(e) => handleSelectBank(e.target.value)} className="w-full rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-3 py-2 text-xs">
+            <option value="">-- Pilih Promo Bank --</option>
+            {bankPromos.map((b: any, idx: number) => (
+              <option key={String(b.Bank_ID || idx)} value={String(b.Bank_ID || idx)}>
+                {b.Nama_Bank} {b.Catatan_Promo ? `— ${b.Catatan_Promo}` : ""}
+              </option>
+            ))}
+          </select>
+          {selectedBank && (
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-slate-500">Nominal Diskon Bank:</span>
+              <input type="number" step={50000} value={manualBankDiscount || ""} onChange={(e) => setManualBankDiscount(Number(e.target.value))} className="w-32 rounded-lg bg-slate-100 dark:bg-slate-800 px-2.5 py-1 text-right font-semibold" />
+            </div>
+          )}
+          <div className="grid grid-cols-2 gap-2">
+            <input type="number" placeholder="Voucher (Rp)" value={voucherAmount || ""} onChange={(e) => setVoucherAmount(Number(e.target.value))} className="rounded-xl bg-slate-100 dark:bg-slate-800 px-3 py-1.5 text-xs" />
+            <input type="number" placeholder="MAPCLUB (Rp)" value={mapclubPoints || ""} onChange={(e) => setMapclubPoints(Number(e.target.value))} className="rounded-xl bg-slate-100 dark:bg-slate-800 px-3 py-1.5 text-xs" />
+          </div>
+        </div>
+
+        <div className="bg-white dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm space-y-3">
+          <div className="flex items-center gap-2">
+            <CreditCard className="w-4 h-4 text-indigo-500" />
+            <h3 className="text-sm font-extrabold">2C. Skema Cicilan &amp; Split DP</h3>
+          </div>
+          <div className="grid grid-cols-3 gap-1.5">
+            {(["FULL", "CC_0", "BNPL"] as const).map((m) => (
+              <button key={m} type="button" onClick={() => setPaymentMethod(m)} className={`py-2 rounded-xl text-xs font-bold border ${paymentMethod === m ? "bg-indigo-600 text-white border-indigo-600" : "bg-slate-100 dark:bg-slate-800 border-slate-200 dark:border-slate-700"}`}>
+                {m === "FULL" ? "Full Pay" : m === "CC_0" ? "Cicilan 0%" : "BNPL"}
+              </button>
+            ))}
+          </div>
+          {paymentMethod === "BNPL" && bnplProviders.length > 0 && (
+            <select value={selectedBnplId} onChange={(e) => setSelectedBnplId(e.target.value)} className="w-full rounded-xl bg-slate-100 dark:bg-slate-800 px-3 py-2 text-xs">
+              {bnplProviders.map((p: any, idx: number) => (
+                <option key={String(p.BNPL_ID || idx)} value={String(p.BNPL_ID || idx)}>{p.Nama_Provider || p.Provider}</option>
+              ))}
+            </select>
+          )}
+          {paymentMethod !== "FULL" && (
+            <div className="grid grid-cols-4 gap-1.5">
+              {[3, 6, 12, 24].map((t) => (
+                <button key={t} type="button" onClick={() => setTenor(t)} className={`py-1.5 rounded-lg text-xs font-bold border ${tenor === t ? "bg-blue-600 text-white border-blue-600" : "bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700"}`}>
+                  {t} Bln
+                </button>
+              ))}
+            </div>
+          )}
+          <div className="flex items-center justify-between text-xs">
+            <span className="text-slate-500">Split DP Cash/Debit:</span>
+            <input type="number" step={500000} value={splitDpCash || ""} placeholder="0" onChange={(e) => setSplitDpCash(Number(e.target.value))} className="w-32 rounded-lg bg-slate-100 dark:bg-slate-800 px-2.5 py-1 text-right font-semibold" />
+          </div>
+        </div>
+      </div>
+
+      {/* ZONA 3: LAYAR KASIR MINI-ETP */}
+      <div className="xl:col-span-3 bg-slate-900 text-white border border-slate-800 rounded-2xl p-5 shadow-lg space-y-4">
+        <div className="flex items-center gap-2 border-b border-slate-800 pb-3">
+          <Calculator className="w-5 h-5 text-blue-400" />
+          <h3 className="text-sm font-extrabold uppercase">3. Layar Kasir ETP</h3>
+        </div>
+
+        <div className="space-y-1.5 text-xs">
+          <div className="flex justify-between text-slate-400"><span>Subtotal</span><span>{formatIDR(subtotal)}</span></div>
+          {tradeInValue > 0 && <div className="flex justify-between text-emerald-400"><span>Trade-In ({tradeInGrade})</span><span>-{formatIDR(tradeInValue)}</span></div>}
+          {bankDiscount > 0 && <div className="flex justify-between text-blue-400"><span>Promo Bank</span><span>-{formatIDR(bankDiscount)}</span></div>}
+          {voucherAmount > 0 && <div className="flex justify-between text-amber-400"><span>Voucher</span><span>-{formatIDR(voucherAmount)}</span></div>}
+          {mapclubPoints > 0 && <div className="flex justify-between text-purple-400"><span>MAPCLUB</span><span>-{formatIDR(mapclubPoints)}</span></div>}
+          <div className="pt-2 border-t border-slate-800 flex justify-between items-baseline">
+            <span className="font-bold">Total Net</span>
+            <span className="text-lg font-extrabold text-emerald-400">{formatIDR(netPayable)}</span>
+          </div>
+        </div>
+
+        <div className="p-3 rounded-xl bg-blue-600/20 border border-blue-500/40">
+          <div className="text-[11px] text-blue-300">{paymentMethod === "FULL" ? "Full Payment" : `Cicilan ${tenor} Bulan`}</div>
+          <div className="text-xl font-black">{formatIDR(monthlyInstallment)}{paymentMethod !== "FULL" ? "/bln" : ""}</div>
+        </div>
+
+        <div className="space-y-1.5 max-h-48 overflow-y-auto">
+          <div className="text-[11px] font-bold uppercase text-slate-400 flex items-center justify-between">
+            <span>SKU Kasir ({cart.length})</span>
+            <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+          </div>
+          {cart.map((item) => (
+            <div key={item.id} className="p-2 rounded-lg bg-white/5 flex items-center justify-between gap-2">
+              <div className="min-w-0">
+                <div className="font-mono text-[11px] font-bold text-amber-300 truncate">{item.sku}</div>
+                <div className="text-[10px] text-slate-400 truncate">{item.name} (x{item.qty})</div>
+              </div>
+              <button type="button" onClick={() => handleCopySku(item.sku)} className="p-1.5 rounded bg-white/10 hover:bg-blue-600 shrink-0">
+                {copiedSku === item.sku ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+              </button>
+            </div>
+          ))}
+        </div>
+
+        <button type="button" onClick={handleCopyEtpSummary} className="w-full py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-extrabold flex items-center justify-center gap-2">
+          {copiedSummary ? <><Check className="w-4 h-4" /> Tersalin!</> : <><Copy className="w-4 h-4" /> Salin Ringkasan ETP</>}
+        </button>
+      </div>
+    </div>
+  );
+}
