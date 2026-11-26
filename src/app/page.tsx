@@ -1,4 +1,4 @@
-"use client";
+  "use client";
 
 import React, { useEffect, useState } from "react";
 import {
@@ -36,6 +36,12 @@ import {
   TradeInDevice,
   CartItem,
 } from "@/types/ascg";
+import {
+  normalizeBankPromoRows,
+  normalizeBnplRows,
+  normalizeMasterBundle,
+  normalizeTradeInRows,
+} from "@/lib/dataNormalizer";
 
 type NavTab = "COMPARISON" | "ACCESSORIES" | "SIMULATOR" | "PRICELIST";
 
@@ -83,12 +89,12 @@ export default function DigiChoiceHomePage() {
     }
   }, [darkMode]);
 
-  // Load persisted Master Data updates from localStorage
+  // Load & normalize persisted Master Data updates from localStorage
   useEffect(() => {
     try {
       const raw = window.localStorage.getItem(STORAGE_KEY);
       if (raw) {
-        const parsed = JSON.parse(raw);
+        const parsed = normalizeMasterBundle(JSON.parse(raw));
         if (Array.isArray(parsed.devices) && parsed.devices.length)
           setDevices(parsed.devices);
         if (Array.isArray(parsed.accessories) && parsed.accessories.length)
@@ -500,16 +506,19 @@ export default function DigiChoiceHomePage() {
           persistMaster({ accessories: updated });
         }}
         onApplyBankPromos={(updated) => {
-          setBankPromos(updated);
-          persistMaster({ bankPromos: updated });
+          const normalized = normalizeBankPromoRows(updated) as BankPromo[];
+          setBankPromos(normalized);
+          persistMaster({ bankPromos: normalized });
         }}
         onApplyBnpl={(updated) => {
-          setBnplProviders(updated);
-          persistMaster({ bnplProviders: updated });
+          const normalized = normalizeBnplRows(updated) as BnplProvider[];
+          setBnplProviders(normalized);
+          persistMaster({ bnplProviders: normalized });
         }}
         onApplyTradeIn={(updated) => {
-          setTradeInDevices(updated);
-          persistMaster({ tradeInDevices: updated });
+          const normalized = normalizeTradeInRows(updated) as TradeInDevice[];
+          setTradeInDevices(normalized);
+          persistMaster({ tradeInDevices: normalized });
         }}
         onApplyQoala={(updated) => {
           setQoalaTiers(updated);
