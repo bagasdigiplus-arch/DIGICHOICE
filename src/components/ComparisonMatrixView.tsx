@@ -1,778 +1,598 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import {
-  CheckCircle2,
-  Sparkles,
-  Shield,
   ArrowRight,
-  Smartphone,
-  History,
-  Award,
-  PlusCircle,
+  CheckCircle2,
+  Cpu,
   Layers,
+  ShieldCheck,
+  ShoppingBag,
+  Sparkles,
+  Smartphone,
+  Zap,
 } from "lucide-react";
-import {
-  ComparisonItem,
-  LobDevice,
-  AccessoryItem,
-  QoalaTier,
-  MasterDevice,
-} from "@/types/ascg";
-import { formatRupiah, calcMonthlyInstallment } from "@/utils/formatters";
+import { LOB_APPLE_DEVICES, LobDeviceSpec } from "../data/lobDevices";
 
 interface ComparisonMatrixViewProps {
-  comparisons: ComparisonItem[];
-  devices: MasterDevice[];
-  lobDevices: LobDevice[];
-  accessories: AccessoryItem[];
-  qoalaTiers: QoalaTier[];
-  onSendBundleToCart: (items: {
+  customDevices?: any[];
+  onAddToCart?: (item: {
     sku: string;
     name: string;
-    category: "Device" | "Accessory" | "Qoala";
+    category: string;
     price: number;
-    brand?: string;
-    bestSeller?: boolean;
-    segmen?: "Base/Entry" | "Pro/Flagship" | "Ecosystem";
-  }[]) => void;
+    qty: number;
+  }) => void;
 }
 
+const formatIDR = (val: number) =>
+  new Intl.NumberFormat("id-ID", {
+    style: "currency",
+    currency: "IDR",
+    maximumFractionDigits: 0,
+  }).format(val);
+
 export default function ComparisonMatrixView({
-  comparisons,
-  devices,
-  lobDevices,
-  accessories,
-  qoalaTiers,
-  onSendBundleToCart,
+  customDevices = [],
+  onAddToCart,
 }: ComparisonMatrixViewProps) {
-  const [subMode, setSubMode] = useState<"NEW_LINEUP" | "LOB_COMPARE">("NEW_LINEUP");
+  const [selectedLob, setSelectedLob] = useState<
+    "iPhone" | "iPad" | "MacBook" | "Apple Watch"
+  >("iPhone");
+  const [mode, setMode] = useState<"UPGRADE" | "HEAD_TO_HEAD">("UPGRADE");
+  const [addedFeedback, setAddedFeedback] = useState<string | null>(null);
 
-  // State for New Lineup Comparison
-  const groups = useMemo(() => {
-    const map = new Map<string, string>();
-    comparisons.forEach((c) => {
-      if (!map.has(c.Compare_Group_ID)) {
-        map.set(c.Compare_Group_ID, c.Kategori_Komparasi || c.Compare_Group_ID);
-      }
+  // Gabungkan data bawaan LOB_APPLE_DEVICES dengan data dari upload Excel/Google Sheets jika ada
+  const allDevices: LobDeviceSpec[] = useMemo(() => {
+    if (!customDevices || customDevices.length === 0) return LOB_APPLE_DEVICES;
+    const mappedCustom: LobDeviceSpec[] = customDevices.map((d: any, idx: number) => {
+      const modelName = d.Model || d.model || d.Nama_Produk || `Apple Device ${idx + 1}`;
+      const isPro = /pro|max|ultra/i.test(modelName);
+      return {
+        id: d.id || `custom-dev-${idx}`,
+        sku: d.SKU || d.sku || `SKU-DEV-${idx + 1}`,
+        lob: (d.LOB || d.lob || "iPhone") as any,
+        model: modelName,
+        variant: d.Storage || d.Variant || d.variant || "Standard",
+        year: Number(d.Year || 2026),
+        isActive: d.Status ? d.Status !== "Legacy" : true,
+        segment: isPro ? "Pro/Flagship" : "Base/Entry",
+        price: Number(d.SRP || d.Price || d.price || 0),
+        promoPrice: Number(d.Promo || d.Promo_Price || d.promoPrice || 0) || undefined,
+        chip: d.Chip || d.chip || "Apple Silicon",
+        chipScore: isPro ? 96 : 85,
+        display: d.Display || d.display || "Retina XDR Display",
+        refreshRate: isPro ? "120Hz ProMotion" : "60Hz",
+        camera: d.Camera || d.camera || "Advanced Apple Camera",
+        battery: d.Battery || d.battery || "All-Day Battery Life",
+        port: d.Port || d.port || "USB-C",
+        appleIntelligence: true,
+        keyHighlights: [
+          `Performa ${d.Chip || "Apple Silicon"} responsif untuk produktivitas harian`,
+          `Dukungan penuh ekosistem Apple & garansi resmi Indonesia`,
+        ],
+      };
     });
-    return Array.from(map.entries()).map(([id, label]) => ({ id, label }));
-  }, [comparisons]);
+    return [...mappedCustom, ...LOB_APPLE_DEVICES];
+  }, [customDevices]);
 
-  const [selectedGroup, setSelectedGroup] = useState<string>(groups[0]?.id || "CMP-ENTRY");
-  const filteredCards = useMemo(
-    () => comparisons.filter((c) => c.Compare_Group_ID === selectedGroup),
-    [comparisons, selectedGroup]
+  const activeList = useMemo(
+    () => allDevices.filter((d) => d.lob === selectedLob && d.isActive),
+    [allDevices, selectedLob]
   );
 
-  // Active target unit for Essential Bundle auto-recommendation
-  const [focusedDeviceId, setFocusedDeviceId] = useState<string>("");
-  const activeFocusItem = useMemo(() => {
-    return (
-      filteredCards.find((c) => c.Device_ID === focusedDeviceId) ||
-      filteredCards[filteredCards.length - 1] ||
-      comparisons[0]
-    );
-  }, [filteredCards, focusedDeviceId, comparisons]);
+  const baselineList = useMemo(
+    () =>
+      mode === "UPGRADE"
+        ? allDevices.filter((d) => d.lob === selectedLob && !d.isActive)
+        : activeList,
+    [allDevices, selectedLob, mode, activeList]
+  );
 
-  // Essential Bundle interactive checkboxes
-  const recommendedCasing = useMemo(() => {
-    if (!activeFocusItem) return accessories[0];
-    const isPro = activeFocusItem.Segmen_Target === "Pro/Flagship";
-    if (isPro) {
-      return (
-        accessories.find((a) => a.Acc_ID === "ACC-CS-04") ||
-        accessories.find((a) => a.Kategori_Aksesoris === "Casing")!
-      );
+  const [leftId, setLeftId] = useState<string>("");
+  const [rightId, setRightId] = useState<string>("");
+
+  const leftDevice = useMemo(
+    () => baselineList.find((d) => d.id === leftId) || baselineList[0],
+    [baselineList, leftId]
+  );
+
+  const rightDevice = useMemo(
+    () =>
+      activeList.find((d) => d.id === rightId) ||
+      activeList[0],
+    [activeList, rightId]
+  );
+
+  // Kalkulasi "What You Gain If You Upgrade" secara dinamis
+  const upgradeGains = useMemo(() => {
+    if (!leftDevice || !rightDevice) return [];
+    const gains: { title: string; detail: string; badge: string }[] = [];
+
+    const speedDiff = Math.max(15, Math.round(((rightDevice.chipScore - leftDevice.chipScore) / Math.max(30, leftDevice.chipScore)) * 100));
+    if (rightDevice.chip !== leftDevice.chip) {
+      gains.push({
+        title: `Lonjakan Performa ke ${rightDevice.chip}`,
+        detail: `Estimasi peningkatan kecepatan proses & grafis hingga +${speedDiff}% dibanding ${leftDevice.chip}.`,
+        badge: `+${speedDiff}% Faster`,
+      });
     }
-    return (
-      accessories.find((a) => a.Acc_ID === "ACC-CS-02") ||
-      accessories.find((a) => a.Kategori_Aksesoris === "Casing")!
-    );
-  }, [activeFocusItem, accessories]);
 
-  const recommendedAdapter = useMemo(
-    () => accessories.find((a) => a.Acc_ID === "ACC-AD-01") || accessories[0],
-    [accessories]
-  );
+    if (!leftDevice.appleIntelligence && rightDevice.appleIntelligence) {
+      gains.push({
+        title: "Siap Apple Intelligence (AI)",
+        detail: "Mendukung Writing Tools, Clean Up foto, Genmoji, dan Siri generasi terbaru.",
+        badge: "New AI Era",
+      });
+    }
 
-  const recommendedGlass = useMemo(
-    () => accessories.find((a) => a.Acc_ID === "ACC-SP-01") || accessories[0],
-    [accessories]
-  );
+    if (leftDevice.port.includes("Lightning") && rightDevice.port.includes("USB-C")) {
+      gains.push({
+        title: "Transisi ke Port Universal USB-C",
+        detail: "Satu kabel untuk iPhone, iPad, dan MacBook dengan transfer data jauh lebih cepat.",
+        badge: "USB-C Universal",
+      });
+    }
 
-  const matchedQoala = useMemo(() => {
-    const price = activeFocusItem?.Harga_Promo_Cash || 15000000;
-    return (
-      qoalaTiers.find((q) => price >= q.Min_Harga && price <= q.Max_Harga) || qoalaTiers[1]
-    );
-  }, [activeFocusItem, qoalaTiers]);
+    if (!leftDevice.refreshRate.includes("120Hz") && rightDevice.refreshRate.includes("120Hz")) {
+      gains.push({
+        title: "Layar Super Mulus 120Hz ProMotion",
+        detail: "Scrolling 2x lebih halus dengan dukungan Always-On Display yang hemat daya.",
+        badge: "120Hz ProMotion",
+      });
+    }
 
-  const [includeCasing, setIncludeCasing] = useState(true);
-  const [includeAdapter, setIncludeAdapter] = useState(true);
-  const [includeGlass, setIncludeGlass] = useState(true);
-  const [includeQoala, setIncludeQoala] = useState(true);
+    if (leftDevice.camera !== rightDevice.camera) {
+      gains.push({
+        title: "Upgrade Sistem Kamera & Optik",
+        detail: `Beralih dari ${leftDevice.camera} ke ${rightDevice.camera}.`,
+        badge: "Pro Optics",
+      });
+    }
 
-  // State for LOB Comparison
-  const lobCategories: LobDevice["Kategori_LOB"][] = [
-    "LOB iPhone",
-    "LOB iPad",
-    "LOB MacBook",
-    "LOB Apple Watch",
-    "LOB AirPods",
-  ];
-  const [selectedLobCat, setSelectedLobCat] = useState<LobDevice["Kategori_LOB"]>("LOB iPhone");
-  const filteredLobList = useMemo(
-    () => lobDevices.filter((l) => l.Kategori_LOB === selectedLobCat),
-    [lobDevices, selectedLobCat]
-  );
-  const [selectedLobId, setSelectedLobId] = useState<string>("");
-  const currentLob = useMemo(
-    () => filteredLobList.find((l) => l.LOB_ID === selectedLobId) || filteredLobList[0],
-    [filteredLobList, selectedLobId]
-  );
+    return gains.length > 0
+      ? gains
+      : rightDevice.keyHighlights.map((h, i) => ({
+          title: `Keunggulan Utama #${i + 1}`,
+          detail: h,
+          badge: "Highlight",
+        }));
+  }, [leftDevice, rightDevice]);
 
-  const handleSendSelectedBundle = () => {
-    if (!activeFocusItem) return;
-    const bundleList: {
-      sku: string;
-      name: string;
-      category: "Device" | "Accessory" | "Qoala";
-      price: number;
-      brand?: string;
-      bestSeller?: boolean;
-      segmen?: "Base/Entry" | "Pro/Flagship" | "Ecosystem";
-    }[] = [
+  // Rekomendasi Essential Bundle otomatis sesuai segmen Base/Entry vs Pro/Flagship
+  const essentialBundle = useMemo(() => {
+    if (!rightDevice) return [];
+    const isPro = rightDevice.segment === "Pro/Flagship";
+    const devPrice = rightDevice.promoPrice || rightDevice.price;
+
+    if (selectedLob === "iPhone") {
+      return isPro
+        ? [
+            {
+              sku: "ACC-CASE-T5-MAG",
+              name: "Casing Tier 4–6 (Pro MagSafe / FineWoven / Aramid)",
+              tag: "Casing Tier 4–6",
+              price: 899000,
+            },
+            {
+              sku: "ACC-TG-SAPPHIRE",
+              name: "Tempered Glass Full-Cover + Lens Ring Protector",
+              tag: "Protection",
+              price: 449000,
+            },
+            {
+              sku: "ACC-ADP-30W-ORIG",
+              name: "Apple 30W USB-C Power Adapter Original",
+              tag: "Fast Charge",
+              price: 649000,
+            },
+            {
+              sku: "QOALA-24M-PRO",
+              name: "Proteksi Qoala 24 Bulan (Layar Pecah & Cairan)",
+              tag: "Qoala 24 Bln",
+              price: devPrice > 20000000 ? 1899000 : 1499000,
+            },
+          ]
+        : [
+            {
+              sku: "ACC-CASE-T2-CLR",
+              name: "Casing Tier 1–3 (Clear MagSafe / Silicone Essential)",
+              tag: "Casing Tier 1–3",
+              price: 499000,
+            },
+            {
+              sku: "ACC-TG-STD",
+              name: "Tempered Glass HD Anti-Scratch",
+              tag: "Protection",
+              price: 299000,
+            },
+            {
+              sku: "ACC-ADP-20W-ORIG",
+              name: "Apple 20W USB-C Power Adapter Original",
+              tag: "Fast Charge",
+              price: 449000,
+            },
+            {
+              sku: "QOALA-12M-BASE",
+              name: "Proteksi Qoala 12 Bulan (Total Protection)",
+              tag: "Qoala 12 Bln",
+              price: 899000,
+            },
+          ];
+    }
+
+    if (selectedLob === "MacBook") {
+      return [
+        {
+          sku: isPro ? "ACC-SLV-PRO14" : "ACC-SLV-AIR13",
+          name: isPro ? "Premium Leather Sleeve + USB-C Multiport Hub" : "Minimalist Sleeve + USB-C Adapter",
+          tag: isPro ? "Tier 4–6" : "Tier 1–3",
+          price: isPro ? 1299000 : 799000,
+        },
+        {
+          sku: "QOALA-MAC-24M",
+          name: "Proteksi Qoala 24 Bulan MacBook",
+          tag: "Qoala 24 Bln",
+          price: 1999000,
+        },
+      ];
+    }
+
+    return [
       {
-        sku: activeFocusItem.Device_ID,
-        name: activeFocusItem.Seri_Model_Varian,
-        category: "Device",
-        price: activeFocusItem.Harga_Promo_Cash,
-        brand: "Apple",
-        segmen: activeFocusItem.Segmen_Target,
+        sku: "ACC-ESSENTIAL-PACK",
+        name: isPro ? "Pro Accessory Bundle (Tier 4–6)" : "Essential Accessory Bundle (Tier 1–3)",
+        tag: isPro ? "Pro Bundle" : "Essential",
+        price: isPro ? 999000 : 599000,
+      },
+      {
+        sku: "QOALA-GADGET-12M",
+        name: "Proteksi Qoala 12 Bulan",
+        tag: "Qoala 12 Bln",
+        price: 799000,
       },
     ];
+  }, [rightDevice, selectedLob]);
 
-    if (includeCasing && recommendedCasing) {
-      bundleList.push({
-        sku: recommendedCasing.Acc_ID,
-        name: recommendedCasing.Nama_Produk,
-        category: "Accessory",
-        price: recommendedCasing.Harga_Promo,
-        brand: recommendedCasing.Merek,
-        bestSeller: recommendedCasing.Label_Best_Seller === "BEST SELLER",
-      });
-    }
-    if (includeGlass && recommendedGlass) {
-      bundleList.push({
-        sku: recommendedGlass.Acc_ID,
-        name: recommendedGlass.Nama_Produk,
-        category: "Accessory",
-        price: recommendedGlass.Harga_Promo,
-        brand: recommendedGlass.Merek,
-        bestSeller: recommendedGlass.Label_Best_Seller === "BEST SELLER",
-      });
-    }
-    if (includeAdapter && recommendedAdapter) {
-      bundleList.push({
-        sku: recommendedAdapter.Acc_ID,
-        name: recommendedAdapter.Nama_Produk,
-        category: "Accessory",
-        price: recommendedAdapter.Harga_Promo,
-        brand: recommendedAdapter.Merek,
-        bestSeller: recommendedAdapter.Label_Best_Seller === "BEST SELLER",
-      });
-    }
-    if (includeQoala && matchedQoala) {
-      bundleList.push({
-        sku: matchedQoala.SKU_12_Bln,
-        name: `${matchedQoala.Nama_Paket} (12 Bulan)`,
-        category: "Qoala",
-        price: matchedQoala.Premi_12_Bln,
-        brand: "Qoala",
-      });
-    }
+  const bundleTotal = essentialBundle.reduce((acc, b) => acc + b.price, 0);
 
-    onSendBundleToCart(bundleList);
+  const handlePushToCart = (includeBundle: boolean) => {
+    if (!rightDevice || !onAddToCart) return;
+    onAddToCart({
+      sku: rightDevice.sku,
+      name: `${rightDevice.model} (${rightDevice.variant})`,
+      category: rightDevice.lob,
+      price: rightDevice.promoPrice || rightDevice.price,
+      qty: 1,
+    });
+    if (includeBundle) {
+      essentialBundle.forEach((b) =>
+        onAddToCart({
+          sku: b.sku,
+          name: b.name,
+          category: "Bundle / Qoala",
+          price: b.price,
+          qty: 1,
+        })
+      );
+    }
+    setAddedFeedback(
+      includeBundle
+        ? "Perangkat + Essential Bundle masuk ke Simulasi Cart!"
+        : "Perangkat masuk ke Simulasi Cart!"
+    );
+    setTimeout(() => setAddedFeedback(null), 3000);
   };
 
   return (
     <div className="space-y-6">
-      {/* Top Mode Switcher */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
-        <div>
-          <h2 className="text-lg font-extrabold text-slate-900">
-            Comparison Matrix & Smart Step-Up Guide
-          </h2>
-          <p className="text-xs text-slate-500">
-            Bandingkan varian Apple baru di toko atau ukur lonjakan fitur dari perangkat lama (LOB) customer
-          </p>
+      {/* Top Bar: LOB Filter & Mode Switcher */}
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 bg-white dark:bg-zinc-900/80 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-4 shadow-sm">
+        <div className="flex flex-wrap gap-2">
+          {(["iPhone", "iPad", "MacBook", "Apple Watch"] as const).map((lob) => (
+            <button
+              key={lob}
+              onClick={() => {
+                setSelectedLob(lob);
+                setLeftId("");
+                setRightId("");
+              }}
+              className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all ${
+                selectedLob === lob
+                  ? "bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 shadow"
+                  : "bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700"
+              }`}
+            >
+              {lob}
+            </button>
+          ))}
         </div>
 
-        <div className="inline-flex rounded-xl bg-slate-100 p-1 border border-slate-200">
+        <div className="flex items-center gap-2 bg-zinc-100 dark:bg-zinc-800 p-1 rounded-xl">
           <button
-            onClick={() => setSubMode("NEW_LINEUP")}
-            className={`flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-xs font-bold transition ${
-              subMode === "NEW_LINEUP"
-                ? "bg-slate-900 text-white shadow-sm"
-                : "text-slate-600 hover:text-slate-900"
+            onClick={() => {
+              setMode("UPGRADE");
+              setLeftId("");
+            }}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+              mode === "UPGRADE"
+                ? "bg-white dark:bg-zinc-900 text-blue-600 dark:text-blue-400 shadow-sm"
+                : "text-zinc-600 dark:text-zinc-400"
             }`}
           >
-            <Smartphone className="h-3.5 w-3.5" />
-            Bandingkan Varian Baru
+            Upgrade dari Perangkat Lama
           </button>
           <button
-            onClick={() => setSubMode("LOB_COMPARE")}
-            className={`flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-xs font-bold transition ${
-              subMode === "LOB_COMPARE"
-                ? "bg-blue-600 text-white shadow-sm"
-                : "text-slate-600 hover:text-slate-900"
+            onClick={() => {
+              setMode("HEAD_TO_HEAD");
+              setLeftId("");
+            }}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+              mode === "HEAD_TO_HEAD"
+                ? "bg-white dark:bg-zinc-900 text-blue-600 dark:text-blue-400 shadow-sm"
+                : "text-zinc-600 dark:text-zinc-400"
             }`}
           >
-            <History className="h-3.5 w-3.5" />
-            Bandingkan Device Lama (LOB)
+            Bandingkan Seri Aktif
           </button>
         </div>
       </div>
 
-      {/* MODE 1: NEW LINEUP COMPARISON MATRIX */}
-      {subMode === "NEW_LINEUP" && (
-        <>
-          {/* Group Filter Pills */}
-          <div className="flex flex-wrap gap-2">
-            {groups.map((g) => (
-              <button
-                key={g.id}
-                onClick={() => {
-                  setSelectedGroup(g.id);
-                  setFocusedDeviceId("");
-                }}
-                className={`rounded-xl px-4 py-2 text-xs font-bold border transition ${
-                  selectedGroup === g.id
-                    ? "bg-blue-600 text-white border-blue-600 shadow-sm"
-                    : "bg-white text-slate-700 border-slate-200 hover:border-blue-300"
-                }`}
-              >
-                {g.label}
-              </button>
+      {/* Selector Cards */}
+      <div className="grid grid-cols-1 lg:grid-cols-11 gap-4 items-center">
+        {/* Left Device Selector */}
+        <div className="lg:col-span-5 bg-white dark:bg-zinc-900/80 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-5 shadow-sm">
+          <label className="block text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2">
+            {mode === "UPGRADE" ? "Perangkat Customer Saat Ini (LOB Baseline)" : "Pilihan Model A"}
+          </label>
+          <select
+            value={leftDevice?.id || ""}
+            onChange={(e) => setLeftId(e.target.value)}
+            className="w-full rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 px-3.5 py-2.5 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            {baselineList.map((d) => (
+              <option key={d.id} value={d.id}>
+                {d.model} {d.variant !== "Legacy" ? `(${d.variant})` : `• Rilis ${d.year}`}
+              </option>
             ))}
-          </div>
-
-          {/* Comparison Cards Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-            {filteredCards.map((item) => {
-              const isSelectedForBundle = activeFocusItem?.Device_ID === item.Device_ID;
-              const cicilan24 = calcMonthlyInstallment(item.Harga_Promo_Cash, 24, 0);
-              const deltaCicilan24 = calcMonthlyInstallment(item.Upgrade_Delta_Cash, 24, 0);
-
-              return (
-                <div
-                  key={item.Device_ID}
-                  onClick={() => setFocusedDeviceId(item.Device_ID)}
-                  className={`cursor-pointer rounded-2xl bg-white border-2 transition-all flex flex-col justify-between overflow-hidden ${
-                    isSelectedForBundle
-                      ? "border-blue-600 shadow-lg ring-2 ring-blue-100"
-                      : "border-slate-200 hover:border-blue-300 shadow-sm"
-                  }`}
-                >
-                  <div>
-                    {/* Card Header */}
-                    <div
-                      className={`px-5 py-4 ${
-                        item.Segmen_Target === "Pro/Flagship"
-                          ? "bg-slate-900 text-white"
-                          : "bg-slate-100 text-slate-900 border-b border-slate-200"
-                      }`}
-                    >
-                      <div className="flex items-center justify-between gap-2 mb-1.5">
-                        <span
-                          className={`rounded-md px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
-                            item.Segmen_Target === "Pro/Flagship"
-                              ? "bg-amber-500 text-slate-950"
-                              : "bg-blue-600 text-white"
-                          }`}
-                        >
-                          {item.Segmen_Target}
-                        </span>
-                        {isSelectedForBundle && (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/20 px-2.5 py-0.5 text-[10px] font-bold text-emerald-400 border border-emerald-500/30">
-                            <CheckCircle2 className="h-3 w-3" /> Target Bundle Aktif
-                          </span>
-                        )}
-                      </div>
-                      <h3 className="text-lg font-extrabold">{item.Seri_Model_Varian}</h3>
-                      <p
-                        className={`text-xs mt-0.5 ${
-                          item.Segmen_Target === "Pro/Flagship" ? "text-slate-300" : "text-slate-600"
-                        }`}
-                      >
-                        {item.Best_For_Profile}
-                      </p>
-                    </div>
-
-                    {/* Pricing & Installment Box */}
-                    <div className="px-5 py-3.5 bg-blue-50/50 border-b border-slate-100">
-                      <div className="flex items-baseline justify-between">
-                        <div>
-                          {item.Harga_SRP_Normal > item.Harga_Promo_Cash && (
-                            <p className="text-xs text-slate-400 line-through">
-                              {formatRupiah(item.Harga_SRP_Normal)}
-                            </p>
-                          )}
-                          <p className="text-xl font-black text-slate-900">
-                            {formatRupiah(item.Harga_Promo_Cash)}
-                          </p>
-                        </div>
-                        <div className="text-right">
-                          <p className="text-[11px] font-semibold text-blue-700">
-                            CC 0% 24 Bln: {formatRupiah(cicilan24)}/bln
-                          </p>
-                          {item.Upgrade_Delta_Cash > 0 ? (
-                            <span className="inline-block mt-0.5 rounded bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800">
-                              Selisih +{formatRupiah(deltaCicilan24)}/bln
-                            </span>
-                          ) : (
-                            <span className="inline-block mt-0.5 rounded bg-slate-200 px-2 py-0.5 text-[10px] font-bold text-slate-700">
-                              Varian Baseline Grup
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* What You Gain If You Upgrade */}
-                    <div className="p-5 space-y-3">
-                      <div className="rounded-xl bg-emerald-50/80 border border-emerald-200/80 p-3 space-y-2">
-                        <p className="text-[11px] font-extrabold uppercase tracking-wider text-emerald-800 flex items-center gap-1.5">
-                          <Sparkles className="h-3.5 w-3.5 text-emerald-600" />
-                          Keunggulan Utama (What You Gain):
-                        </p>
-                        <ul className="space-y-1.5 text-xs text-slate-700">
-                          <li className="flex items-start gap-1.5">
-                            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0 mt-0.5" />
-                            <span>{item.What_You_Gain_1}</span>
-                          </li>
-                          <li className="flex items-start gap-1.5">
-                            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0 mt-0.5" />
-                            <span>{item.What_You_Gain_2}</span>
-                          </li>
-                          <li className="flex items-start gap-1.5">
-                            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0 mt-0.5" />
-                            <span>{item.What_You_Gain_3}</span>
-                          </li>
-                        </ul>
-                      </div>
-
-                      {/* Technical Specs */}
-                      <div className="space-y-2 text-xs pt-1">
-                        <div className="border-b border-slate-100 pb-1.5">
-                          <span className="text-[11px] font-semibold text-slate-400 block">
-                            Layar & Refresh Rate
-                          </span>
-                          <span className="font-semibold text-slate-800">
-                            {item.Layar_dan_Refresh_Rate}
-                          </span>
-                        </div>
-                        <div className="border-b border-slate-100 pb-1.5">
-                          <span className="text-[11px] font-semibold text-slate-400 block">
-                            Chipset & Apple Intelligence
-                          </span>
-                          <span className="font-semibold text-slate-800">
-                            {item.Chipset_dan_Apple_Intelligence}
-                          </span>
-                        </div>
-                        <div className="border-b border-slate-100 pb-1.5">
-                          <span className="text-[11px] font-semibold text-slate-400 block">
-                            Kamera & Video
-                          </span>
-                          <span className="font-semibold text-slate-800">
-                            {item.Sistem_Kamera_dan_Video}
-                          </span>
-                        </div>
-                        <div>
-                          <span className="text-[11px] font-semibold text-slate-400 block">
-                            Baterai, Port & Material
-                          </span>
-                          <span className="font-medium text-slate-700">
-                            {item.Baterai_dan_Konektivitas} • {item.Material_dan_Ketahanan}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Card Footer */}
-                  <div className="px-5 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-between">
-                    <span className="text-[11px] font-semibold text-slate-600">
-                      {item.Rekomendasi_Casing_Tier.split("(")[0]}
-                    </span>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onSendBundleToCart([
-                          {
-                            sku: item.Device_ID,
-                            name: item.Seri_Model_Varian,
-                            category: "Device",
-                            price: item.Harga_Promo_Cash,
-                            brand: "Apple",
-                            segmen: item.Segmen_Target,
-                          },
-                        ]);
-                      }}
-                      className="inline-flex items-center gap-1 rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-bold text-white hover:bg-blue-600 transition"
-                    >
-                      <PlusCircle className="h-3.5 w-3.5" />
-                      Pilih Unit
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          {/* AUTO ESSENTIAL BUNDLE RECOMMENDATION BAR */}
-          {activeFocusItem && (
-            <div className="rounded-2xl bg-gradient-to-r from-slate-900 via-slate-800 to-blue-950 text-white p-6 shadow-xl border border-slate-700">
-              <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 pb-4 border-b border-slate-700/80">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="rounded-md bg-amber-500 px-2.5 py-0.5 text-[11px] font-extrabold text-slate-950 uppercase">
-                      Rekomendasi Bundle Wajib Otomatis
-                    </span>
-                    <span className="text-xs text-blue-300 font-semibold">
-                      Segmen: {activeFocusItem.Segmen_Target}
-                    </span>
-                  </div>
-                  <h3 className="text-lg font-extrabold mt-1">
-                    Lengkapi {activeFocusItem.Seri_Model_Varian} dengan Proteksi & Aksesoris Ideal
-                  </h3>
-                  <p className="text-xs text-slate-300">
-                    {activeFocusItem.Segmen_Target === "Pro/Flagship"
-                      ? "Perangkat Pro/Flagship otomatis diarahkan ke Casing Tier 4–6 (Durability Kokoh & Raised Camera Guard)."
-                      : "Perangkat Base/Entry otomatis diarahkan ke Casing Tier 1–3 (Value & Anti-Yellowing)."}
-                  </p>
-                </div>
-
-                <button
-                  onClick={handleSendSelectedBundle}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-500 hover:bg-blue-400 px-5 py-3 text-sm font-extrabold text-white shadow-lg transition shrink-0"
-                >
-                  <span>Kirim Unit + Bundle ke Simulasi Pembayaran</span>
-                  <ArrowRight className="h-4 w-4" />
-                </button>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5 pt-4">
-                {/* Casing Option */}
-                <label className="cursor-pointer rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 p-3.5 flex flex-col justify-between transition">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={includeCasing}
-                        onChange={(e) => setIncludeCasing(e.target.checked)}
-                        className="h-4 w-4 rounded accent-blue-500"
-                      />
-                      <span className="text-xs font-bold text-amber-400">
-                        {recommendedCasing?.Tier_Casing} • {recommendedCasing?.Merek}
-                      </span>
-                    </div>
-                    <span className="rounded bg-amber-500 px-1.5 py-0.5 text-[9px] font-black text-slate-950">
-                      BEST SELLER
-                    </span>
-                  </div>
-                  <p className="text-xs font-semibold text-white mt-2">
-                    {recommendedCasing?.Nama_Produk}
-                  </p>
-                  <div className="mt-2 pt-2 border-t border-white/10 flex items-center justify-between text-xs">
-                    <span className="font-bold text-emerald-300">
-                      {formatRupiah(recommendedCasing?.Harga_Promo || 0)}
-                    </span>
-                    <span className="text-[11px] text-slate-300">
-                      +{formatRupiah(calcMonthlyInstallment(recommendedCasing?.Harga_Promo || 0, 24))}/bln
-                    </span>
-                  </div>
-                </label>
-
-                {/* Screen Protector */}
-                <label className="cursor-pointer rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 p-3.5 flex flex-col justify-between transition">
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={includeGlass}
-                      onChange={(e) => setIncludeGlass(e.target.checked)}
-                      className="h-4 w-4 rounded accent-blue-500"
-                    />
-                    <span className="text-xs font-bold text-blue-300">Screen Protection</span>
-                  </div>
-                  <p className="text-xs font-semibold text-white mt-2">
-                    {recommendedGlass?.Nama_Produk}
-                  </p>
-                  <div className="mt-2 pt-2 border-t border-white/10 flex items-center justify-between text-xs">
-                    <span className="font-bold text-emerald-300">
-                      {formatRupiah(recommendedGlass?.Harga_Promo || 0)}
-                    </span>
-                    <span className="text-[11px] text-slate-300">
-                      +{formatRupiah(calcMonthlyInstallment(recommendedGlass?.Harga_Promo || 0, 24))}/bln
-                    </span>
-                  </div>
-                </label>
-
-                {/* Adapter */}
-                <label className="cursor-pointer rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 p-3.5 flex flex-col justify-between transition">
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={includeAdapter}
-                      onChange={(e) => setIncludeAdapter(e.target.checked)}
-                      className="h-4 w-4 rounded accent-blue-500"
-                    />
-                    <span className="text-xs font-bold text-blue-300">Power Adapter</span>
-                  </div>
-                  <p className="text-xs font-semibold text-white mt-2">
-                    {recommendedAdapter?.Nama_Produk}
-                  </p>
-                  <div className="mt-2 pt-2 border-t border-white/10 flex items-center justify-between text-xs">
-                    <span className="font-bold text-emerald-300">
-                      {formatRupiah(recommendedAdapter?.Harga_Promo || 0)}
-                    </span>
-                    <span className="text-[11px] text-slate-300">
-                      +{formatRupiah(calcMonthlyInstallment(recommendedAdapter?.Harga_Promo || 0, 24))}/bln
-                    </span>
-                  </div>
-                </label>
-
-                {/* Proteksi Qoala */}
-                <label className="cursor-pointer rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 p-3.5 flex flex-col justify-between transition">
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={includeQoala}
-                      onChange={(e) => setIncludeQoala(e.target.checked)}
-                      className="h-4 w-4 rounded accent-blue-500"
-                    />
-                    <span className="text-xs font-bold text-emerald-300 flex items-center gap-1">
-                      <Shield className="h-3.5 w-3.5" /> Proteksi Qoala 12 Bln
-                    </span>
-                  </div>
-                  <p className="text-xs font-semibold text-white mt-2">
-                    {matchedQoala?.Nama_Paket}
-                  </p>
-                  <div className="mt-2 pt-2 border-t border-white/10 flex items-center justify-between text-xs">
-                    <span className="font-bold text-emerald-300">
-                      {formatRupiah(matchedQoala?.Premi_12_Bln || 0)}
-                    </span>
-                    <span className="text-[11px] text-slate-300">
-                      +{formatRupiah(calcMonthlyInstallment(matchedQoala?.Premi_12_Bln || 0, 24))}/bln
-                    </span>
-                  </div>
-                </label>
-              </div>
+          </select>
+          {leftDevice && (
+            <div className="mt-3 flex items-center justify-between text-xs text-zinc-500">
+              <span>Chip: {leftDevice.chip}</span>
+              <span>Tahun: {leftDevice.year}</span>
             </div>
           )}
-        </>
-      )}
+        </div>
 
-      {/* MODE 2: LEGACY / LOB COMPARISON */}
-      {subMode === "LOB_COMPARE" && (
-        <div className="space-y-5">
-          {/* Category LOB Filter */}
-          <div className="flex flex-wrap gap-2">
-            {lobCategories.map((cat) => (
-              <button
-                key={cat}
-                onClick={() => {
-                  setSelectedLobCat(cat);
-                  setSelectedLobId("");
-                }}
-                className={`rounded-xl px-4 py-2 text-xs font-bold border transition ${
-                  selectedLobCat === cat
-                    ? "bg-slate-900 text-white border-slate-900"
-                    : "bg-white text-slate-700 border-slate-200 hover:border-slate-400"
+        {/* Arrow Divider */}
+        <div className="lg:col-span-1 flex justify-center">
+          <div className="w-10 h-10 rounded-full bg-blue-600/10 text-blue-600 dark:text-blue-400 flex items-center justify-center">
+            <ArrowRight className="w-5 h-5 rotate-90 lg:rotate-0" />
+          </div>
+        </div>
+
+        {/* Right Device Selector */}
+        <div className="lg:col-span-5 bg-gradient-to-br from-blue-50/80 to-indigo-50/50 dark:from-blue-950/30 dark:to-zinc-900 border border-blue-200 dark:border-blue-800/60 rounded-2xl p-5 shadow-sm">
+          <div className="flex items-center justify-between mb-2">
+            <label className="text-xs font-semibold uppercase tracking-wider text-blue-600 dark:text-blue-400">
+              Rekomendasi Upgrade / Model B
+            </label>
+            {rightDevice && (
+              <span
+                className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full ${
+                  rightDevice.segment === "Pro/Flagship"
+                    ? "bg-amber-500/15 text-amber-600 dark:text-amber-400"
+                    : "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
                 }`}
               >
-                {cat}
-              </button>
+                {rightDevice.segment}
+              </span>
+            )}
+          </div>
+          <select
+            value={rightDevice?.id || ""}
+            onChange={(e) => setRightId(e.target.value)}
+            className="w-full rounded-xl border border-blue-300 dark:border-blue-700 bg-white dark:bg-zinc-800 px-3.5 py-2.5 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            {activeList.map((d) => (
+              <option key={d.id} value={d.id}>
+                {d.model} ({d.variant}) — {formatIDR(d.promoPrice || d.price)}
+              </option>
+            ))}
+          </select>
+          {rightDevice && (
+            <div className="mt-3 flex items-center justify-between text-xs">
+              <span className="font-mono text-zinc-500">SKU: {rightDevice.sku}</span>
+              <span className="font-bold text-blue-600 dark:text-blue-400">
+                {formatIDR(rightDevice.promoPrice || rightDevice.price)}
+              </span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* What You Gain If You Upgrade Banner */}
+      {rightDevice && (
+        <div className="bg-white dark:bg-zinc-900/90 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-6 shadow-sm">
+          <div className="flex items-center gap-2.5 mb-4">
+            <div className="p-2 rounded-xl bg-amber-500/15 text-amber-600 dark:text-amber-400">
+              <Sparkles className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-base font-bold">
+                What You Gain If You Upgrade ke {rightDevice.model}
+              </h3>
+              <p className="text-xs text-zinc-500">
+                Poin nilai tambah utama untuk disampaikan saat konsultasi customer
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
+            {upgradeGains.map((gain, idx) => (
+              <div
+                key={idx}
+                className="p-4 rounded-xl bg-zinc-50 dark:bg-zinc-800/70 border border-zinc-200/80 dark:border-zinc-700/70 flex flex-col justify-between"
+              >
+                <div>
+                  <span className="inline-block text-[11px] font-bold px-2 py-0.5 rounded-md bg-blue-600/10 text-blue-600 dark:text-blue-400 mb-2">
+                    {gain.badge}
+                  </span>
+                  <h4 className="text-sm font-bold mb-1">{gain.title}</h4>
+                  <p className="text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed">
+                    {gain.detail}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Side-by-Side Spec Matrix */}
+      {leftDevice && rightDevice && (
+        <div className="bg-white dark:bg-zinc-900/90 border border-zinc-200 dark:border-zinc-800 rounded-2xl overflow-hidden shadow-sm">
+          <div className="px-6 py-4 border-b border-zinc-200 dark:border-zinc-800 flex items-center gap-2">
+            <Layers className="w-4 h-4 text-blue-600" />
+            <h3 className="text-sm font-bold">Matriks Perbandingan Spesifikasi Teknis</h3>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm text-left">
+              <thead className="bg-zinc-50 dark:bg-zinc-800/60 text-xs uppercase text-zinc-500">
+                <tr>
+                  <th className="px-6 py-3.5 w-1/4">Parameter</th>
+                  <th className="px-6 py-3.5 w-[37.5%]">{leftDevice.model}</th>
+                  <th className="px-6 py-3.5 w-[37.5%] text-blue-600 dark:text-blue-400">
+                    {rightDevice.model} ({rightDevice.variant})
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
+                <tr>
+                  <td className="px-6 py-3.5 font-medium text-zinc-500">Chipset & Performa</td>
+                  <td className="px-6 py-3.5">{leftDevice.chip}</td>
+                  <td className="px-6 py-3.5 font-semibold text-zinc-900 dark:text-white">
+                    {rightDevice.chip}
+                  </td>
+                </tr>
+                <tr>
+                  <td className="px-6 py-3.5 font-medium text-zinc-500">Layar & Refresh Rate</td>
+                  <td className="px-6 py-3.5">
+                    {leftDevice.display} ({leftDevice.refreshRate})
+                  </td>
+                  <td className="px-6 py-3.5 font-semibold text-zinc-900 dark:text-white">
+                    {rightDevice.display} ({rightDevice.refreshRate})
+                  </td>
+                </tr>
+                <tr>
+                  <td className="px-6 py-3.5 font-medium text-zinc-500">Sistem Kamera / Sensor</td>
+                  <td className="px-6 py-3.5">{leftDevice.camera}</td>
+                  <td className="px-6 py-3.5 font-semibold text-zinc-900 dark:text-white">
+                    {rightDevice.camera}
+                  </td>
+                </tr>
+                <tr>
+                  <td className="px-6 py-3.5 font-medium text-zinc-500">Daya Tahan Baterai</td>
+                  <td className="px-6 py-3.5">{leftDevice.battery}</td>
+                  <td className="px-6 py-3.5 font-semibold text-zinc-900 dark:text-white">
+                    {rightDevice.battery}
+                  </td>
+                </tr>
+                <tr>
+                  <td className="px-6 py-3.5 font-medium text-zinc-500">Konektivitas / Port</td>
+                  <td className="px-6 py-3.5">{leftDevice.port}</td>
+                  <td className="px-6 py-3.5 font-semibold text-zinc-900 dark:text-white">
+                    {rightDevice.port}
+                  </td>
+                </tr>
+                <tr>
+                  <td className="px-6 py-3.5 font-medium text-zinc-500">Apple Intelligence</td>
+                  <td className="px-6 py-3.5">
+                    {leftDevice.appleIntelligence ? "Didukung" : "Tidak Didukung"}
+                  </td>
+                  <td className="px-6 py-3.5 font-semibold text-emerald-600 dark:text-emerald-400">
+                    {rightDevice.appleIntelligence ? "Didukung Penuh" : "Standard WatchOS"}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Segmented Essential Bundle Recommendation */}
+      {rightDevice && (
+        <div className="bg-gradient-to-r from-zinc-900 to-zinc-800 dark:from-zinc-900 dark:to-zinc-950 text-white rounded-2xl p-6 border border-zinc-700 shadow-lg">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-5 border-b border-zinc-700/80">
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <ShieldCheck className="w-5 h-5 text-emerald-400" />
+                <span className="text-xs font-bold uppercase tracking-wider text-emerald-400">
+                  Smart Attach-Rate Engine • Profil {rightDevice.segment}
+                </span>
+              </div>
+              <h3 className="text-lg font-bold">
+                Rekomendasi Essential Bundle untuk {rightDevice.model}
+              </h3>
+              <p className="text-xs text-zinc-400 mt-0.5">
+                {rightDevice.segment === "Pro/Flagship"
+                  ? "Segmen Pro/Flagship diarahkan ke Casing Tier 4–6 + Proteksi Qoala 24 Bulan untuk proteksi maksimal."
+                  : "Segmen Base/Entry diarahkan ke Casing Tier 1–3 + Paket Charger & Qoala 12 Bulan yang hemat."}
+              </p>
+            </div>
+            <div className="text-left md:text-right">
+              <div className="text-xs text-zinc-400">Estimasi Paket Aksesoris & Qoala</div>
+              <div className="text-xl font-extrabold text-emerald-400">
+                {formatIDR(bundleTotal)}
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 my-5">
+            {essentialBundle.map((item) => (
+              <div
+                key={item.sku}
+                className="flex items-center justify-between p-3.5 rounded-xl bg-white/5 border border-white/10"
+              >
+                <div className="pr-3">
+                  <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300">
+                    {item.tag}
+                  </span>
+                  <div className="text-sm font-medium mt-1">{item.name}</div>
+                  <div className="text-[11px] font-mono text-zinc-400">SKU: {item.sku}</div>
+                </div>
+                <div className="text-sm font-bold whitespace-nowrap">{formatIDR(item.price)}</div>
+              </div>
             ))}
           </div>
 
-          {/* Selector Dropdown for Customer's Old Device */}
-          <div className="bg-white p-4 rounded-2xl border border-slate-200 flex flex-col sm:flex-row sm:items-center gap-4">
-            <div className="flex items-center gap-2 text-sm font-bold text-slate-800 shrink-0">
-              <Layers className="h-4 w-4 text-blue-600" />
-              <span>Pilih Perangkat Lama Customer:</span>
-            </div>
-            <select
-              value={currentLob?.LOB_ID || ""}
-              onChange={(e) => setSelectedLobId(e.target.value)}
-              className="w-full sm:max-w-md rounded-xl border border-slate-300 bg-slate-50 px-3.5 py-2 text-sm font-semibold text-slate-900 focus:border-blue-500 focus:outline-none"
-            >
-              {filteredLobList.map((lob) => (
-                <option key={lob.LOB_ID} value={lob.LOB_ID}>
-                  [{lob.Tahun_Rilis}] {lob.Model_Varian} ({lob.Seri_atau_Lini})
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {currentLob && (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Left Card: Customer's Current Old Device */}
-              <div className="rounded-2xl bg-white border border-slate-300 overflow-hidden shadow-sm">
-                <div className="bg-slate-200 px-5 py-3.5 border-b border-slate-300 flex items-center justify-between">
-                  <div>
-                    <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-600">
-                      Perangkat Customer Saat Ini ({currentLob.LOB_ID})
-                    </span>
-                    <h3 className="text-lg font-extrabold text-slate-900">
-                      {currentLob.Model_Varian}
-                    </h3>
-                  </div>
-                  <span className="rounded-lg bg-slate-700 px-2.5 py-1 text-xs font-bold text-white">
-                    Rilis {currentLob.Tahun_Rilis}
-                  </span>
+          {onAddToCart && (
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+              {addedFeedback ? (
+                <div className="flex items-center gap-2 text-sm font-semibold text-emerald-400">
+                  <CheckCircle2 className="w-4 h-4" />
+                  {addedFeedback}
                 </div>
+              ) : (
+                <span className="text-xs text-zinc-400">
+                  Langsung masukkan ke Simulasi Pembayaran & Kasir ETP:
+                </span>
+              )}
 
-                <div className="p-5 space-y-3 text-xs">
-                  <div className="grid grid-cols-2 gap-3 border-b border-slate-100 pb-2.5">
-                    <div>
-                      <span className="text-slate-400 block">Layar / Desain</span>
-                      <span className="font-semibold text-slate-800">
-                        {currentLob.Layar_atau_Desain}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-slate-400 block">Chipset & Spesifikasi</span>
-                      <span className="font-semibold text-slate-800">
-                        {currentLob.Chipset_dan_Spec}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-3 border-b border-slate-100 pb-2.5">
-                    <div>
-                      <span className="text-slate-400 block">Status Apple Intelligence</span>
-                      <span
-                        className={`inline-block mt-0.5 rounded px-2 py-0.5 font-bold ${
-                          currentLob.Apple_Intelligence.includes("Tidak")
-                            ? "bg-rose-100 text-rose-700"
-                            : "bg-emerald-100 text-emerald-700"
-                        }`}
-                      >
-                        {currentLob.Apple_Intelligence}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-slate-400 block">Baterai & Port</span>
-                      <span className="font-semibold text-slate-800">
-                        {currentLob.Baterai_dan_Port}
-                      </span>
-                    </div>
-                  </div>
-                  <div>
-                    <span className="text-slate-400 block">Fitur Utama Saat Rilis</span>
-                    <span className="font-medium text-slate-700">{currentLob.Fitur_Utama}</span>
-                  </div>
-
-                  {/* Pain Point / Gap Highlight */}
-                  <div className="rounded-xl bg-rose-50 border border-rose-200 p-3.5 mt-2">
-                    <p className="text-[11px] font-extrabold uppercase text-rose-800 mb-1">
-                      Keterbatasan / Gap vs Seri Baru di Toko:
-                    </p>
-                    <p className="text-xs font-medium text-rose-900">
-                      {currentLob.Gap_vs_Seri_Baru_Toko}
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Right Card: Upgrade Target Recommendation */}
-              <div className="rounded-2xl bg-gradient-to-br from-blue-950 via-slate-900 to-slate-900 text-white border border-blue-800 overflow-hidden shadow-lg flex flex-col justify-between">
-                <div>
-                  <div className="bg-blue-600/30 px-5 py-3.5 border-b border-blue-800/60 flex items-center justify-between">
-                    <div>
-                      <span className="text-[10px] font-extrabold uppercase tracking-wider text-blue-300">
-                        Rekomendasi Upgrade Terdekat di Toko
-                      </span>
-                      <h3 className="text-lg font-extrabold text-white">
-                        {currentLob.Rekomendasi_Upgrade_Terdekat}
-                      </h3>
-                    </div>
-                    <Award className="h-6 w-6 text-amber-400" />
-                  </div>
-
-                  <div className="p-5 space-y-4 text-xs">
-                    <p className="text-slate-300 leading-relaxed">
-                      Dengan melakukan upgrade dari <strong>{currentLob.Model_Varian}</strong> ke{" "}
-                      <strong>{currentLob.Rekomendasi_Upgrade_Terdekat}</strong>, pelanggan langsung
-                      mendapatkan lonjakan teknologi terbaru serta berhak atas program{" "}
-                      <span className="text-amber-300 font-bold">
-                        Trade-In Laku6 + Bonus Top-Up
-                      </span>{" "}
-                      di kasir.
-                    </p>
-
-                    <div className="space-y-2">
-                      <p className="text-[11px] font-bold uppercase tracking-wider text-blue-300">
-                        Unit Tersedia di Toko yang Cocok:
-                      </p>
-                      {devices
-                        .filter((d) =>
-                          currentLob.Rekomendasi_Upgrade_Terdekat
-                            .toLowerCase()
-                            .includes(d.Seri_Keluarga.toLowerCase())
-                        )
-                        .slice(0, 3)
-                        .map((dev) => (
-                          <div
-                            key={dev.Device_ID}
-                            className="rounded-xl bg-white/10 border border-white/15 p-3 flex items-center justify-between gap-2"
-                          >
-                            <div>
-                              <p className="font-bold text-white text-sm">
-                                {dev.Model_Varian} ({dev.Storage})
-                              </p>
-                              <p className="text-[11px] text-slate-300">{dev.Layar_Refresh_Rate}</p>
-                            </div>
-                            <div className="text-right shrink-0">
-                              <p className="font-extrabold text-emerald-300 text-sm">
-                                {formatRupiah(dev.Harga_SRP_Promo)}
-                              </p>
-                              <button
-                                onClick={() =>
-                                  onSendBundleToCart([
-                                    {
-                                      sku: dev.Device_ID,
-                                      name: `${dev.Model_Varian} (${dev.Storage})`,
-                                      category: "Device",
-                                      price: dev.Harga_SRP_Promo,
-                                      brand: "Apple",
-                                      segmen: dev.Segmen_Target,
-                                    },
-                                  ])
-                                }
-                                className="mt-1 inline-flex items-center gap-1 rounded-lg bg-blue-500 hover:bg-blue-400 px-2.5 py-1 text-[11px] font-bold text-white transition"
-                              >
-                                <PlusCircle className="h-3 w-3" /> Simulasikan
-                              </button>
-                            </div>
-                          </div>
-                        ))}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="px-5 py-3.5 bg-white/5 border-t border-white/10 flex items-center justify-between text-xs">
-                  <span className="text-slate-300">
-                    Ingin hitung potongan Trade-In Laku6?
-                  </span>
-                  <button
-                    onClick={() => setSubMode("NEW_LINEUP")}
-                    className="font-bold text-amber-400 hover:underline"
-                  >
-                    Lihat Paket Bundling &rarr;
-                  </button>
-                </div>
+              <div className="flex flex-wrap gap-2.5 ml-auto">
+                <button
+                  onClick={() => handlePushToCart(false)}
+                  className="px-4 py-2.5 rounded-xl text-xs font-semibold bg-white/10 hover:bg-white/20 transition"
+                >
+                  + Unit Saja
+                </button>
+                <button
+                  onClick={() => handlePushToCart(true)}
+                  className="px-5 py-2.5 rounded-xl text-xs font-bold bg-emerald-500 hover:bg-emerald-400 text-zinc-950 flex items-center gap-2 shadow transition"
+                >
+                  <ShoppingBag className="w-4 h-4" />
+                  + Unit & Essential Bundle
+                </button>
               </div>
             </div>
           )}
