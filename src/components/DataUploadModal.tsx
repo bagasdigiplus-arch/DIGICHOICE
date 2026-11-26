@@ -477,7 +477,7 @@ export default function DataUploadModal({
           })),
         });
       } else if (selectedType === "QOALA") {
-        const parsedQoala: QoalaTier[] = rows
+        const parsedQoala: any[] = rows
           .filter((r) => r["Nama_Paket"] || r["Tier_ID"])
           .map((r, i) => ({
             Tier_ID: String(r["Tier_ID"] || `QOA-${i + 1}`),
