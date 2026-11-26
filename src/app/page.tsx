@@ -164,7 +164,7 @@ export default function DigiChoiceHomePage() {
     upsertCartItem({
       id: acc.Acc_ID,
       sku: acc.SAP_Article,
-      name: `${acc.Merek} -${acc.Nama_Produk}`,
+      name: `${acc.Merek} - ${acc.Nama_Produk}`,
       category: "Accessory",
       brand: acc.Merek,
       bestSeller: acc.Label_Best_Seller === "BEST SELLER",
@@ -308,4 +308,225 @@ export default function DigiChoiceHomePage() {
             <button
               type="button"
               onClick={() => setActiveTab("COMPARISON")}
-              className={`px-
+              className={`px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold flex items-center gap-2 whitespace-nowrap transition ${
+                activeTab === "COMPARISON"
+                  ? "bg-blue-600 text-white shadow-sm"
+                  : "text-slate-600 dark:text-slate-400 hover:bg-white/70 dark:hover:bg-slate-800/70"
+              }`}
+            >
+              <Layers className="w-4 h-4" />
+              1. Komparasi &amp; Upgrade LOB
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab("ACCESSORIES")}
+              className={`px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold flex items-center gap-2 whitespace-nowrap transition ${
+                activeTab === "ACCESSORIES"
+                  ? "bg-blue-600 text-white shadow-sm"
+                  : "text-slate-600 dark:text-slate-400 hover:bg-white/70 dark:hover:bg-slate-800/70"
+              }`}
+            >
+              <ShieldCheck className="w-4 h-4" />
+              2. Aksesoris &amp; Proteksi Qoala
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab("SIMULATOR")}
+              className={`px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold flex items-center gap-2 whitespace-nowrap transition ${
+                activeTab === "SIMULATOR"
+                  ? "bg-blue-600 text-white shadow-sm"
+                  : "text-slate-600 dark:text-slate-400 hover:bg-white/70 dark:hover:bg-slate-800/70"
+              }`}
+            >
+              <Calculator className="w-4 h-4" />
+              3. Simulasi Trade-In, Cicilan &amp; ETP
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab("PRICELIST")}
+              className={`px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold flex items-center gap-2 whitespace-nowrap transition ${
+                activeTab === "PRICELIST"
+                  ? "bg-blue-600 text-white shadow-sm"
+                  : "text-slate-600 dark:text-slate-400 hover:bg-white/70 dark:hover:bg-slate-800/70"
+              }`}
+            >
+              <FileSpreadsheet className="w-4 h-4" />
+              4. Master Pricelist SAP
+            </button>
+          </div>
+        </div>
+      </header>
+
+      {/* Main Content Container */}
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
+        {activeTab === "COMPARISON" && (
+          <ComparisonMatrixView
+            customDevices={devices.map((d) => ({
+              id: d.Device_ID,
+              SKU: d.SAP_Article,
+              LOB: d.Model_Varian.includes("iPad")
+                ? "iPad"
+                : d.Model_Varian.includes("Mac")
+                ? "MacBook"
+                : d.Model_Varian.includes("Watch")
+                ? "Apple Watch"
+                : "iPhone",
+              Model: d.Model_Varian,
+              Storage: d.Storage,
+              SRP: d.Harga_SRP_Promo,
+              Promo: d.Harga_SRP_Promo,
+            }))}
+            onAddToCart={(item) =>
+              upsertCartItem({
+                id: `${item.sku}-${Date.now()}`,
+                sku: item.sku,
+                name: item.name,
+                category: item.category.includes("Qoala")
+                  ? "Qoala"
+                  : item.category.includes("Bundle")
+                  ? "Accessory"
+                  : "Device",
+                price: item.price,
+              })
+            }
+          />
+        )}
+
+        {activeTab === "ACCESSORIES" && (
+          <AccessoriesCatalogView
+            accessories={accessories}
+            qoalaTiers={qoalaTiers}
+            onAddAccToCart={handleAddAccToCart}
+            onAddQoalaToCart={handleAddQoalaToCart}
+          />
+        )}
+
+        {activeTab === "SIMULATOR" && (
+          <PaymentSimulatorView
+            cart={cart}
+            devices={devices}
+            accessories={accessories}
+            qoalaTiers={qoalaTiers}
+            bankPromos={bankPromos}
+            bnplProviders={bnplProviders}
+            tradeInDevices={tradeInDevices}
+            onUpdateQty={handleUpdateQty}
+            onRemoveItem={handleRemoveItem}
+            onClearCart={handleClearCart}
+            onAddDeviceToCart={handleAddDeviceToCart}
+            onAddAccToCart={handleAddAccToCart}
+            onAddQoalaToCart={handleAddQoalaToCart}
+            onAddManualItem={handleAddManualItem}
+            onOpenBarcodeModal={() => setIsBarcodeOpen(true)}
+          />
+        )}
+
+        {activeTab === "PRICELIST" && (
+          <MasterPricelistView
+            customDevices={devices.map((d) => ({
+              SKU: d.SAP_Article,
+              LOB: d.Model_Varian.includes("iPad")
+                ? "iPad"
+                : d.Model_Varian.includes("Mac")
+                ? "MacBook"
+                : d.Model_Varian.includes("Watch")
+                ? "Apple Watch"
+                : "iPhone",
+              Model: d.Model_Varian,
+              Storage: d.Storage,
+              SRP: d.Harga_SRP_Promo,
+            }))}
+            customAccessories={accessories.map((a) => ({
+              SKU: a.SAP_Article,
+              Tier: a.Merek,
+              Nama_Produk: `${a.Merek} - ${a.Nama_Produk}`,
+              SRP: a.Harga_Promo,
+              Badge: a.Label_Best_Seller,
+            }))}
+            customQoala={qoalaTiers.flatMap((q) => [
+              {
+                SKU_ETP: q.SKU_12_Bln,
+                Durasi: "12 Bulan",
+                Nama_Paket: `Proteksi Qoala ${q.Kode_Tier} (12 Bulan)`,
+                Premi: q.Premi_12_Bln,
+              },
+              {
+                SKU_ETP: q.SKU_24_Bln,
+                Durasi: "24 Bulan",
+                Nama_Paket: `Proteksi Qoala ${q.Kode_Tier} (24 Bulan)`,
+                Premi: q.Premi_24_Bln,
+              },
+            ])}
+            onAddToCart={(item) =>
+              handleAddManualItem(item.name, item.sku, item.price)
+            }
+          />
+        )}
+      </main>
+
+      {/* Footer */}
+      <footer className="border-t border-slate-200/70 dark:border-slate-800/70 py-5 px-4 sm:px-6 lg:px-8 text-xs text-slate-500 dark:text-slate-400">
+        <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2">
+          <div>
+            <strong>DIGI CHOICE — Apple Smart Choice Guide (ASCG)</strong> •
+            Digimap Retail Consultation System
+          </div>
+          <div>
+            Master Pricelist 23 November 2026 • Siap Deploy GitHub Codespaces
+            &amp; Vercel
+          </div>
+        </div>
+      </footer>
+
+      {/* Excel / CSV Upload Modal */}
+      <DataUploadModal
+        isOpen={isUploadOpen}
+        onClose={() => setIsUploadOpen(false)}
+        devices={devices}
+        accessories={accessories}
+        bankPromos={bankPromos}
+        bnplProviders={bnplProviders}
+        tradeInDevices={tradeInDevices}
+        qoalaTiers={qoalaTiers}
+        onApplyDevices={(updated) => {
+          setDevices(updated);
+          persistMaster({ devices: updated });
+        }}
+        onApplyAccessories={(updated) => {
+          setAccessories(updated);
+          persistMaster({ accessories: updated });
+        }}
+        onApplyBankPromos={(updated) => {
+          setBankPromos(updated);
+          persistMaster({ bankPromos: updated });
+        }}
+        onApplyBnpl={(updated) => {
+          setBnplProviders(updated);
+          persistMaster({ bnplProviders: updated });
+        }}
+        onApplyTradeIn={(updated) => {
+          setTradeInDevices(updated);
+          persistMaster({ tradeInDevices: updated });
+        }}
+        onApplyQoala={(updated) => {
+          setQoalaTiers(updated);
+          persistMaster({ qoalaTiers: updated });
+        }}
+        onResetAllToDefault={handleResetAllToDefault}
+      />
+
+      {/* Barcode / SAP Lookup Modal */}
+      <BarcodeModal
+        isOpen={isBarcodeOpen}
+        onClose={() => setIsBarcodeOpen(false)}
+        devices={devices}
+        accessories={accessories}
+        onAddDeviceToCart={handleAddDeviceToCart}
+        onAddAccToCart={handleAddAccToCart}
+      />
+    </div>
+  );
+}
