@@ -1,59 +1,54 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import {
-  Calculator,
-  ShoppingCart,
-  Trash2,
-  Plus,
-  Minus,
-  CreditCard,
-  Wallet,
   Banknote,
+  Calculator,
+  Check,
+  Copy,
+  CreditCard,
+  Minus,
+  Plus,
   RefreshCw,
-  Receipt,
-  CheckCircle2,
-  X,
   ScanBarcode,
   ShieldCheck,
+  ShoppingCart,
+  Trash2,
 } from "lucide-react";
-import {
-  CartItem,
-  MasterDevice,
-  AccessoryItem,
-  QoalaTier,
-  BankPromo,
-  BnplProvider,
-  TradeInDevice,
-} from "@/types/ascg";
-import { formatRupiah, calcMonthlyInstallment } from "@/utils/formatters";
 
 interface PaymentSimulatorViewProps {
-  cart: CartItem[];
-  devices: MasterDevice[];
-  accessories: AccessoryItem[];
-  qoalaTiers: QoalaTier[];
-  bankPromos: BankPromo[];
-  bnplProviders: BnplProvider[];
-  tradeInDevices: TradeInDevice[];
+  cart: any[];
+  devices?: any[];
+  accessories?: any[];
+  qoalaTiers?: any[];
+  bankPromos?: any[];
+  bnplProviders?: any[];
+  tradeInDevices?: any[];
   onUpdateQty: (id: string, delta: number) => void;
   onRemoveItem: (id: string) => void;
   onClearCart: () => void;
-  onAddDeviceToCart: (device: MasterDevice) => void;
-  onAddAccToCart: (acc: AccessoryItem) => void;
-  onAddQoalaToCart: (tier: QoalaTier, duration: 12 | 24) => void;
+  onAddDeviceToCart: (device: any) => void;
+  onAddAccToCart: (acc: any) => void;
+  onAddQoalaToCart: (tier: any, duration: 12 | 24) => void;
   onAddManualItem: (name: string, sku: string, price: number) => void;
   onOpenBarcodeModal: () => void;
 }
 
+const formatIDR = (val: number) =>
+  new Intl.NumberFormat("id-ID", {
+    style: "currency",
+    currency: "IDR",
+    maximumFractionDigits: 0,
+  }).format(Math.max(0, Math.round(val || 0)));
+
 export default function PaymentSimulatorView({
-  cart,
-  devices,
-  accessories,
-  qoalaTiers,
-  bankPromos,
-  bnplProviders,
-  tradeInDevices,
+  cart = [],
+  devices = [],
+  accessories = [],
+  qoalaTiers = [],
+  bankPromos = [],
+  bnplProviders = [],
+  tradeInDevices = [],
   onUpdateQty,
   onRemoveItem,
   onClearCart,
@@ -63,905 +58,751 @@ export default function PaymentSimulatorView({
   onAddManualItem,
   onOpenBarcodeModal,
 }: PaymentSimulatorViewProps) {
-  const [mode, setMode] = useState<"CART_ETP" | "STANDALONE">(
-    cart.length > 0 ? "CART_ETP" : "STANDALONE"
-  );
-
-  // ==========================
-  // SHARED TRADE-IN & DEDUCTION STATE
-  // ==========================
+  // Trade-In Laku6 States
   const [selectedTradeInId, setSelectedTradeInId] = useState<string>("");
   const [tradeInGrade, setTradeInGrade] = useState<"A" | "B" | "C">("A");
-  const [bankCashback, setBankCashback] = useState<number>(0);
-  const [storeVoucher, setStoreVoucher] = useState<number>(0);
+  const [tradeInBonus, setTradeInBonus] = useState<number>(0);
+
+  // Promo, Voucher, MAPCLUB
+  const [selectedBankId, setSelectedBankId] = useState<string>("");
+  const [voucherAmount, setVoucherAmount] = useState<number>(0);
   const [mapclubPoints, setMapclubPoints] = useState<number>(0);
+
+  // Payment Scheme & Split Payment
+  const [paymentMethod, setPaymentMethod] = useState<
+    "FULL" | "CC_0" | "BNPL"
+  >("CC_0");
+  const [tenor, setTenor] = useState<number>(12);
+  const [selectedBnplId, setSelectedBnplId] = useState<string>("");
   const [splitDpCash, setSplitDpCash] = useState<number>(0);
 
-  // Payment Tab State
-  const [payMethodTab, setPayMethodTab] = useState<"CC" | "BNPL" | "CASH">("CC");
-  const [selectedBankId, setSelectedBankId] = useState<string>(bankPromos[0]?.Bank_ID || "BNK-BCA");
-  const [selectedBnplId, setSelectedBnplId] = useState<string>(
-    bnplProviders[0]?.BNPL_ID || "BNPL-KRD"
+  // Quick Add & Manual Item
+  const [quickAddType, setQuickAddType] = useState<"DEVICE" | "ACC" | "QOALA">(
+    "DEVICE"
   );
-
-  // Standalone Calculator State
-  const [standaloneDeviceId, setStandaloneDeviceId] = useState<string>(
-    devices[3]?.Device_ID || ""
-  );
-  const [customStandalonePrice, setCustomStandalonePrice] = useState<number>(
-    devices[3]?.Harga_SRP_Promo || 16999000
-  );
-
-  // Quick Add inside Cart ETP
-  const [quickDeviceSelect, setQuickDeviceSelect] = useState<string>(devices[0]?.Device_ID || "");
-  const [quickAccSelect, setQuickAccSelect] = useState<string>(accessories[0]?.Acc_ID || "");
+  const [quickAddId, setQuickAddId] = useState<string>("");
   const [manualName, setManualName] = useState("");
   const [manualSku, setManualSku] = useState("");
   const [manualPrice, setManualPrice] = useState<number>(0);
 
-  // ETP Cashier Handover Modal
-  const [showEtpModal, setShowEtpModal] = useState(false);
+  // Copy Feedback
+  const [copiedSku, setCopiedSku] = useState<string | null>(null);
+  const [copiedSummary, setCopiedSummary] = useState(false);
 
-  // Calculate Trade-In Laku6 Valuation
-  const tradeInValuation = useMemo(() => {
-    const item = tradeInDevices.find((t) => t.TradeIn_ID === selectedTradeInId);
-    if (!item) return { base: 0, bonus: 0, total: 0, label: "" };
-    const multiplier = tradeInGrade === "A" ? 1 : tradeInGrade === "B" ? 0.85 : 0.7;
-    const base = Math.round(item.Harga_Grade_A * multiplier);
-    return {
-      base,
-      bonus: item.Bonus_TopUp,
-      total: base + item.Bonus_TopUp,
-      label: `${item.Tipe_Device_Lama} (Grade ${tradeInGrade})`,
-    };
-  }, [selectedTradeInId, tradeInGrade, tradeInDevices]);
-
-  // Subtotals
-  const cartSubtotal = useMemo(
-    () => cart.reduce((sum, item) => sum + item.price * item.qty, 0),
+  // Subtotal & Attach Rate Check
+  const subtotal = useMemo(
+    () =>
+      cart.reduce(
+        (sum, item) => sum + Number(item.price || 0) * Number(item.qty || 1),
+        0
+      ),
     [cart]
   );
 
-  const activeGrossAmount = mode === "CART_ETP" ? cartSubtotal : customStandalonePrice;
-  const totalDeductions =
-    tradeInValuation.total + bankCashback + storeVoucher + mapclubPoints + splitDpCash;
-  const netPayable = Math.max(0, activeGrossAmount - totalDeductions);
+  const attachStatus = useMemo(() => {
+    const hasDevice = cart.some((i) => i.category === "Device");
+    const hasAcc = cart.some((i) => i.category === "Accessory");
+    const hasQoala = cart.some((i) => i.category === "Qoala");
+    return { hasDevice, hasAcc, hasQoala };
+  }, [cart]);
 
-  const activeBank = useMemo(
-    () => bankPromos.find((b) => b.Bank_ID === selectedBankId) || bankPromos[0],
+  // Trade-In Laku6 Valuation
+  const selectedTradeIn = useMemo(
+    () =>
+      tradeInDevices.find(
+        (t: any) => String(t.TradeIn_ID || t.Model_Lama) === selectedTradeInId
+      ),
+    [tradeInDevices, selectedTradeInId]
+  );
+
+  const tradeInValue = useMemo(() => {
+    if (!selectedTradeIn) return 0;
+    const baseA = Number(
+      selectedTradeIn.Harga_Grade_A ?? selectedTradeIn.Estimasi_Buyback ?? 0
+    );
+    const baseB = Number(
+      selectedTradeIn.Harga_Grade_B ?? Math.round(baseA * 0.85)
+    );
+    const baseC = Number(
+      selectedTradeIn.Harga_Grade_C ?? Math.round(baseA * 0.7)
+    );
+    const gradeVal =
+      tradeInGrade === "A" ? baseA : tradeInGrade === "B" ? baseB : baseC;
+    return gradeVal + Number(tradeInBonus || 0);
+  }, [selectedTradeIn, tradeInGrade, tradeInBonus]);
+
+  // Bank Promo Discount
+  const selectedBank = useMemo(
+    () =>
+      bankPromos.find(
+        (b: any) => String(b.Promo_ID || b.Nama_Bank) === selectedBankId
+      ),
     [bankPromos, selectedBankId]
   );
 
-  const activeBnpl = useMemo(
-    () => bnplProviders.find((p) => p.BNPL_ID === selectedBnplId) || bnplProviders[0],
+  const bankDiscount = useMemo(() => {
+    if (!selectedBank) return 0;
+    const minTrx = Number(selectedBank.Min_Transaksi || 0);
+    if (subtotal < minTrx) return 0;
+    return Number(selectedBank.Nominal_Diskon || selectedBank.Cashback || 0);
+  }, [selectedBank, subtotal]);
+
+  // Net Payable & Installment Calculation
+  const totalDeductions =
+    tradeInValue +
+    bankDiscount +
+    Number(voucherAmount || 0) +
+    Number(mapclubPoints || 0);
+
+  const netPayable = Math.max(0, subtotal - totalDeductions);
+  const financedAmount = Math.max(0, netPayable - Number(splitDpCash || 0));
+
+  const selectedBnpl = useMemo(
+    () =>
+      bnplProviders.find(
+        (p: any) => String(p.BNPL_ID || p.Nama_Provider) === selectedBnplId
+      ) || bnplProviders[0],
     [bnplProviders, selectedBnplId]
   );
 
-  // Recommended Qoala for current cart device
-  const cartDevicePrice = useMemo(() => {
-    const dev = cart.find((c) => c.category === "Device");
-    return dev ? dev.price : 0;
-  }, [cart]);
+  const monthlyInstallment = useMemo(() => {
+    if (paymentMethod === "FULL" || tenor <= 0) return financedAmount;
+    if (paymentMethod === "CC_0") {
+      return financedAmount / tenor;
+    }
+    // BNPL monthly interest rate (default ~1.99%/bln jika tidak tercantum di master)
+    const monthlyRate =
+      Number(selectedBnpl?.Bunga_Persen ?? selectedBnpl?.Interest_Rate ?? 1.99) /
+      100;
+    const totalWithInterest = financedAmount * (1 + monthlyRate * tenor);
+    return totalWithInterest / tenor;
+  }, [paymentMethod, tenor, financedAmount, selectedBnpl]);
 
-  const suggestedQoala = useMemo(() => {
-    if (cartDevicePrice <= 0) return qoalaTiers[1];
-    return (
-      qoalaTiers.find((q) => cartDevicePrice >= q.Min_Harga && cartDevicePrice <= q.Max_Harga) ||
-      qoalaTiers[1]
-    );
-  }, [cartDevicePrice, qoalaTiers]);
+  const handleQuickAdd = () => {
+    if (quickAddType === "DEVICE") {
+      const target =
+        devices.find((d: any) => String(d.Device_ID) === quickAddId) ||
+        devices[0];
+      if (target) onAddDeviceToCart(target);
+    } else if (quickAddType === "ACC") {
+      const target =
+        accessories.find((a: any) => String(a.Acc_ID) === quickAddId) ||
+        accessories[0];
+      if (target) onAddAccToCart(target);
+    } else {
+      const target =
+        qoalaTiers.find((q: any) => String(q.Tier_ID) === quickAddId) ||
+        qoalaTiers[0];
+      if (target) onAddQoalaToCart(target, 12);
+    }
+  };
+
+  const handleCopySku = (sku: string) => {
+    navigator.clipboard?.writeText(sku);
+    setCopiedSku(sku);
+    setTimeout(() => setCopiedSku(null), 1600);
+  };
+
+  const handleCopyEtpSummary = () => {
+    const lines = [
+      "=== RINGKASAN KASIR ETP — DIGI CHOICE ===",
+      ...cart.map(
+        (i) =>
+          `• [${i.sku}] ${i.name} x${i.qty} = ${formatIDR(i.price * i.qty)}`
+      ),
+      `Subtotal: ${formatIDR(subtotal)}`,
+      tradeInValue > 0 ? `Trade-In Laku6 (Grade ${tradeInGrade}): -${formatIDR(tradeInValue)}` : null,
+      bankDiscount > 0 ? `Promo Bank: -${formatIDR(bankDiscount)}` : null,
+      voucherAmount > 0 ? `Voucher: -${formatIDR(voucherAmount)}` : null,
+      mapclubPoints > 0 ? `Redeem MAPCLUB: -${formatIDR(mapclubPoints)}` : null,
+      `TOTAL BAYAR NET: ${formatIDR(netPayable)}`,
+      splitDpCash > 0 ? `Split DP Cash/Debit: ${formatIDR(splitDpCash)}` : null,
+      paymentMethod !== "FULL"
+        ? `Skema ${paymentMethod === "CC_0" ? "Cicilan 0% CC" : "BNPL"} ${tenor}x: ${formatIDR(monthlyInstallment)}/bln`
+        : "Skema: Full Payment",
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    navigator.clipboard?.writeText(lines);
+    setCopiedSummary(true);
+    setTimeout(() => setCopiedSummary(false), 2000);
+  };
 
   return (
-    <div className="space-y-6">
-      {/* Top Mode Switcher */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
-        <div>
-          <h2 className="text-lg font-extrabold text-slate-900">
-            Simulasi Pembayaran, Trade-In Laku6 & Mini-ETP Cart
-          </h2>
-          <p className="text-xs text-slate-500">
-            Hitung cicilan mandiri kapan saja atau kelola transaksi lengkap siap serah ke kasir ETP
-          </p>
-        </div>
+    <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
+      {/* ZONA 1: UNIFIED ETP CONSULTATION CART (5 COLS) */}
+      <div className="xl:col-span-5 space-y-4">
+        <div className="bg-white dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <ShoppingCart className="w-5 h-5 text-blue-600" />
+              <h2 className="text-base font-extrabold">1. Keranjang Konsultasi</h2>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={onOpenBarcodeModal}
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-blue-600/10 text-blue-600 dark:text-blue-400 hover:bg-blue-600 hover:text-white transition"
+              >
+                <ScanBarcode className="w-3.5 h-3.5" />
+                Scan
+              </button>
+              {cart.length > 0 && (
+                <button
+                  type="button"
+                  onClick={onClearCart}
+                  className="text-xs font-semibold text-slate-400 hover:text-red-500"
+                >
+                  Kosongkan
+                </button>
+              )}
+            </div>
+          </div>
 
-        <div className="inline-flex rounded-xl bg-slate-100 p-1 border border-slate-200">
-          <button
-            onClick={() => setMode("CART_ETP")}
-            className={`flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-xs font-bold transition ${
-              mode === "CART_ETP"
-                ? "bg-slate-900 text-white shadow-sm"
-                : "text-slate-600 hover:text-slate-900"
-            }`}
-          >
-            <ShoppingCart className="h-3.5 w-3.5" />
-            Simulasi Transaksi Cart ({cart.reduce((s, i) => s + i.qty, 0)})
-          </button>
-          <button
-            onClick={() => setMode("STANDALONE")}
-            className={`flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-xs font-bold transition ${
-              mode === "STANDALONE"
-                ? "bg-blue-600 text-white shadow-sm"
-                : "text-slate-600 hover:text-slate-900"
-            }`}
-          >
-            <Calculator className="h-3.5 w-3.5" />
-            Kalkulator Cicilan Cepat (Bebas)
-          </button>
+          {/* Attach Rate Indicator Pills */}
+          <div className="flex flex-wrap gap-1.5 text-[11px] font-bold">
+            <span
+              className={`px-2.5 py-1 rounded-full ${
+                attachStatus.hasDevice
+                  ? "bg-blue-500/15 text-blue-600 dark:text-blue-400"
+                  : "bg-slate-100 dark:bg-slate-800 text-slate-400"
+              }`}
+            >
+              {attachStatus.hasDevice ? "✓ Unit Utama" : "○ Unit Utama"}
+            </span>
+            <span
+              className={`px-2.5 py-1 rounded-full ${
+                attachStatus.hasAcc
+                  ? "bg-amber-500/15 text-amber-600 dark:text-amber-400"
+                  : "bg-slate-100 dark:bg-slate-800 text-slate-400"
+              }`}
+            >
+              {attachStatus.hasAcc ? "✓ Aksesoris / Casing" : "○ Belum Ada Casing"}
+            </span>
+            <span
+              className={`px-2.5 py-1 rounded-full ${
+                attachStatus.hasQoala
+                  ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+                  : "bg-red-500/10 text-red-500"
+              }`}
+            >
+              {attachStatus.hasQoala ? "✓ 100% Qoala" : "! Wajib Tawarkan Qoala"}
+            </span>
+          </div>
+
+          {/* Cart Items List */}
+          {cart.length === 0 ? (
+            <div className="py-8 text-center text-xs text-slate-400 border border-dashed border-slate-300 dark:border-slate-800 rounded-xl">
+              Keranjang masih kosong. Tambahkan unit, aksesoris, atau Qoala di bawah.
+            </div>
+          ) : (
+            <div className="space-y-2.5 max-h-[360px] overflow-y-auto pr-1">
+              {cart.map((item) => (
+                <div
+                  key={item.id}
+                  className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/70 border border-slate-200/80 dark:border-slate-700/70 flex items-center justify-between gap-3"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300">
+                        {item.category}
+                      </span>
+                      <span className="text-[10px] font-mono text-slate-400 truncate">
+                        {item.sku}
+                      </span>
+                    </div>
+                    <div className="text-xs font-bold truncate mt-1">
+                      {item.name}
+                    </div>
+                    <div className="text-xs font-extrabold text-blue-600 dark:text-blue-400 mt-0.5">
+                      {formatIDR(item.price * item.qty)}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => onUpdateQty(item.id, -1)}
+                      className="w-6 h-6 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 flex items-center justify-center hover:border-blue-500"
+                    >
+                      <Minus className="w-3 h-3" />
+                    </button>
+                    <span className="w-5 text-center text-xs font-bold">
+                      {item.qty}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => onUpdateQty(item.id, 1)}
+                      className="w-6 h-6 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 flex items-center justify-center hover:border-blue-500"
+                    >
+                      <Plus className="w-3 h-3" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onRemoveItem(item.id)}
+                      className="p-1 text-slate-400 hover:text-red-500 ml-1"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Quick Add Bar */}
+          <div className="pt-3 border-t border-slate-200 dark:border-slate-800 space-y-2">
+            <label className="block text-[11px] font-bold uppercase text-slate-500">
+              Tambah Cepat dari Master Data
+            </label>
+            <div className="flex gap-1.5">
+              {(["DEVICE", "ACC", "QOALA"] as const).map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => {
+                    setQuickAddType(t);
+                    setQuickAddId("");
+                  }}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold ${
+                    quickAddType === t
+                      ? "bg-blue-600 text-white"
+                      : "bg-slate-100 dark:bg-slate-800 text-slate-500"
+                  }`}
+                >
+                  {t === "DEVICE" ? "Unit" : t === "ACC" ? "Aksesoris" : "Qoala 12B"}
+                </button>
+              ))}
+            </div>
+
+            <div className="flex gap-2">
+              <select
+                value={quickAddId}
+                onChange={(e) => setQuickAddId(e.target.value)}
+                className="flex-1 min-w-0 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-3 py-2 text-xs"
+              >
+                {quickAddType === "DEVICE" &&
+                  devices.map((d: any) => (
+                    <option key={d.Device_ID} value={d.Device_ID}>
+                      {d.Model_Varian} ({d.Storage}) — {formatIDR(d.Harga_SRP_Promo)}
+                    </option>
+                  ))}
+                {quickAddType === "ACC" &&
+                  accessories.map((a: any) => (
+                    <option key={a.Acc_ID} value={a.Acc_ID}>
+                      {a.Merek} - {a.Nama_Produk} ({formatIDR(a.Harga_Promo)})
+                    </option>
+                  ))}
+                {quickAddType === "QOALA" &&
+                  qoalaTiers.map((q: any) => (
+                    <option key={q.Tier_ID} value={q.Tier_ID}>
+                      Qoala {q.Kode_Tier} 12 Bln ({formatIDR(q.Premi_12_Bln)})
+                    </option>
+                  ))}
+              </select>
+              <button
+                type="button"
+                onClick={handleQuickAdd}
+                className="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold whitespace-nowrap"
+              >
+                + Tambah
+              </button>
+            </div>
+          </div>
+
+          {/* Manual Item Entry */}
+          <details className="pt-2 border-t border-slate-200 dark:border-slate-800">
+            <summary className="text-xs font-semibold text-slate-500 cursor-pointer hover:text-blue-500">
+              + Input Item / Biaya Tambahan Manual
+            </summary>
+            <div className="mt-2.5 grid grid-cols-2 gap-2">
+              <input
+                type="text"
+                placeholder="Nama Item"
+                value={manualName}
+                onChange={(e) => setManualName(e.target.value)}
+                className="col-span-2 rounded-lg bg-slate-100 dark:bg-slate-800 px-3 py-1.5 text-xs border border-slate-200 dark:border-slate-700"
+              />
+              <input
+                type="text"
+                placeholder="Kode SKU"
+                value={manualSku}
+                onChange={(e) => setManualSku(e.target.value)}
+                className="rounded-lg bg-slate-100 dark:bg-slate-800 px-3 py-1.5 text-xs border border-slate-200 dark:border-slate-700"
+              />
+              <input
+                type="number"
+                placeholder="Harga (Rp)"
+                value={manualPrice || ""}
+                onChange={(e) => setManualPrice(Number(e.target.value))}
+                className="rounded-lg bg-slate-100 dark:bg-slate-800 px-3 py-1.5 text-xs border border-slate-200 dark:border-slate-700"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  if (!manualName || manualPrice <= 0) return;
+                  onAddManualItem(
+                    manualName,
+                    manualSku || "MANUAL-SKU",
+                    manualPrice
+                  );
+                  setManualName("");
+                  setManualSku("");
+                  setManualPrice(0);
+                }}
+                className="col-span-2 py-1.5 rounded-lg bg-slate-800 dark:bg-slate-700 text-white text-xs font-bold hover:bg-blue-600"
+              >
+                Masukkan ke Keranjang
+              </button>
+            </div>
+          </details>
         </div>
       </div>
 
-      {/* MODE A: STANDALONE QUICK CALCULATOR */}
-      {mode === "STANDALONE" && (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          <div className="lg:col-span-5 rounded-2xl bg-white border border-slate-200 p-5 space-y-4 shadow-sm">
-            <h3 className="text-sm font-extrabold text-slate-900 uppercase tracking-wider">
-              1. Input Harga / Pilih Unit Apple
-            </h3>
+      {/* ZONA 2: TRADE-IN LAKU6, PROMO BANK & SKEMA CICILAN (4 COLS) */}
+      <div className="xl:col-span-4 space-y-4">
+        {/* Trade-In Laku6 Box */}
+        <div className="bg-white dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm space-y-3.5">
+          <div className="flex items-center gap-2">
+            <RefreshCw className="w-4 h-4 text-emerald-500" />
+            <h3 className="text-sm font-extrabold">2A. Trade-In Laku6</h3>
+          </div>
 
-            <div>
-              <label className="block text-xs font-bold text-slate-600 mb-1">
-                Pilih Cepat dari Master Produk:
-              </label>
-              <select
-                value={standaloneDeviceId}
-                onChange={(e) => {
-                  setStandaloneDeviceId(e.target.value);
-                  const found = devices.find((d) => d.Device_ID === e.target.value);
-                  if (found) setCustomStandalonePrice(found.Harga_SRP_Promo);
-                }}
-                className="w-full rounded-xl border border-slate-300 bg-slate-50 px-3 py-2.5 text-xs font-bold text-slate-900"
-              >
-                <option value="">-- Input Harga Manual di Bawah --</option>
-                {devices.map((d) => (
-                  <option key={d.Device_ID} value={d.Device_ID}>
-                    {d.Model_Varian} ({d.Storage}) — {formatRupiah(d.Harga_SRP_Promo)}
-                  </option>
+          <select
+            value={selectedTradeInId}
+            onChange={(e) => setSelectedTradeInId(e.target.value)}
+            className="w-full rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-3 py-2 text-xs"
+          >
+            <option value="">-- Tanpa Trade-In --</option>
+            {tradeInDevices.map((t: any, idx: number) => {
+              const key = String(t.TradeIn_ID || t.Model_Lama || idx);
+              return (
+                <option key={key} value={key}>
+                  {t.Model_Lama || t.Model} ({t.Storage || "All"})
+                </option>
+              );
+            })}
+          </select>
+
+          {selectedTradeIn && (
+            <div className="space-y-2.5 pt-1">
+              <div className="grid grid-cols-3 gap-1.5">
+                {(["A", "B", "C"] as const).map((g) => (
+                  <button
+                    key={g}
+                    type="button"
+                    onClick={() => setTradeInGrade(g)}
+                    className={`py-1.5 rounded-lg text-xs font-bold border ${
+                      tradeInGrade === g
+                        ? "bg-emerald-600 text-white border-emerald-600"
+                        : "bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300"
+                    }`}
+                  >
+                    Grade {g}
+                  </button>
                 ))}
-              </select>
-            </div>
+              </div>
 
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-slate-500">Top-Up / Bonus Trade-In:</span>
+                <input
+                  type="number"
+                  step={100000}
+                  value={tradeInBonus || ""}
+                  placeholder="0"
+                  onChange={(e) => setTradeInBonus(Number(e.target.value))}
+                  className="w-32 rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-2.5 py-1 text-right font-semibold"
+                />
+              </div>
+
+              <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-between text-xs">
+                <span className="font-semibold text-emerald-700 dark:text-emerald-300">
+                  Total Potongan Buyback:
+                </span>
+                <span className="font-extrabold text-emerald-600 dark:text-emerald-400">
+                  -{formatIDR(tradeInValue)}
+                </span>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Promo Bank, Voucher & MAPCLUB */}
+        <div className="bg-white dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm space-y-3">
+          <div className="flex items-center gap-2">
+            <Banknote className="w-4 h-4 text-blue-500" />
+            <h3 className="text-sm font-extrabold">
+              2B. Promo Bank, Voucher &amp; MAPCLUB
+            </h3>
+          </div>
+
+          <div>
+            <label className="block text-[11px] text-slate-500 mb-1">
+              Promo Kartu Kredit / Debit Bank
+            </label>
+            <select
+              value={selectedBankId}
+              onChange={(e) => setSelectedBankId(e.target.value)}
+              className="w-full rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-3 py-2 text-xs"
+            >
+              <option value="">-- Pilih Promo Bank --</option>
+              {bankPromos.map((b: any, idx: number) => {
+                const key = String(b.Promo_ID || b.Nama_Bank || idx);
+                return (
+                  <option key={key} value={key}>
+                    {b.Nama_Bank} — Potongan{" "}
+                    {formatIDR(Number(b.Nominal_Diskon || b.Cashback || 0))}
+                  </option>
+                );
+              })}
+            </select>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2.5">
             <div>
-              <label className="block text-xs font-bold text-slate-600 mb-1">
-                Nominal Harga Transaksi (Rp):
+              <label className="block text-[11px] text-slate-500 mb-1">
+                Voucher Belanja (Rp)
               </label>
               <input
                 type="number"
-                value={customStandalonePrice}
-                onChange={(e) => {
-                  setStandaloneDeviceId("");
-                  setCustomStandalonePrice(Number(e.target.value) || 0);
-                }}
-                className="w-full rounded-xl border-2 border-blue-500 bg-white px-3.5 py-2.5 text-base font-black text-slate-900"
+                step={50000}
+                value={voucherAmount || ""}
+                placeholder="0"
+                onChange={(e) => setVoucherAmount(Number(e.target.value))}
+                className="w-full rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-xs font-semibold"
               />
             </div>
-
-            {/* Trade-In Laku6 Mini Box */}
-            <div className="rounded-xl bg-amber-50/70 border border-amber-200 p-3.5 space-y-2.5">
-              <div className="flex items-center gap-1.5 text-xs font-extrabold text-amber-900">
-                <RefreshCw className="h-3.5 w-3.5 text-amber-600" />
-                <span>Simulasi Trade-In Laku6 (Opsional)</span>
-              </div>
-              <select
-                value={selectedTradeInId}
-                onChange={(e) => setSelectedTradeInId(e.target.value)}
-                className="w-full rounded-lg border border-amber-300 bg-white px-2.5 py-2 text-xs font-semibold"
-              >
-                <option value="">Tanpa Trade-In</option>
-                {tradeInDevices.map((t) => (
-                  <option key={t.TradeIn_ID} value={t.TradeIn_ID}>
-                    {t.Tipe_Device_Lama} (Est. s.d. {formatRupiah(t.Harga_Grade_A + t.Bonus_TopUp)})
-                  </option>
-                ))}
-              </select>
-
-              {selectedTradeInId && (
-                <div className="flex items-center justify-between gap-2 pt-1">
-                  <div className="flex gap-1.5">
-                    {(["A", "B", "C"] as const).map((g) => (
-                      <button
-                        key={g}
-                        onClick={() => setTradeInGrade(g)}
-                        className={`rounded-lg px-2.5 py-1 text-xs font-bold border ${
-                          tradeInGrade === g
-                            ? "bg-amber-600 text-white border-amber-600"
-                            : "bg-white text-slate-700 border-slate-300"
-                        }`}
-                      >
-                        Grade {g}
-                      </button>
-                    ))}
-                  </div>
-                  <span className="text-xs font-extrabold text-emerald-700">
-                    -{formatRupiah(tradeInValuation.total)}
-                  </span>
-                </div>
-              )}
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                  Promo / Cashback Bank (Rp)
-                </label>
-                <input
-                  type="number"
-                  value={bankCashback || ""}
-                  placeholder="0"
-                  onChange={(e) => setBankCashback(Number(e.target.value) || 0)}
-                  className="w-full rounded-xl border border-slate-300 px-3 py-2 text-xs font-bold"
-                />
-              </div>
-              <div>
-                <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                  DP Tunai / Split (Rp)
-                </label>
-                <input
-                  type="number"
-                  value={splitDpCash || ""}
-                  placeholder="0"
-                  onChange={(e) => setSplitDpCash(Number(e.target.value) || 0)}
-                  className="w-full rounded-xl border border-slate-300 px-3 py-2 text-xs font-bold"
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* Right Result Side-by-Side CC vs BNPL */}
-          <div className="lg:col-span-7 space-y-4">
-            <div className="rounded-2xl bg-slate-900 text-white p-5 flex flex-wrap items-center justify-between gap-4">
-              <div>
-                <p className="text-xs text-slate-400">Sisa Tagihan Pembiayaan (Net Payable)</p>
-                <p className="text-2xl sm:text-3xl font-black text-emerald-400">
-                  {formatRupiah(netPayable)}
-                </p>
-              </div>
-              <div className="text-right text-xs text-slate-300">
-                <p>Harga Awal: {formatRupiah(activeGrossAmount)}</p>
-                <p className="text-amber-300 font-semibold">
-                  Total Potongan & DP: -{formatRupiah(totalDeductions)}
-                </p>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* CC 0% Card */}
-              <div className="rounded-2xl bg-white border border-slate-200 p-5 space-y-3 shadow-sm">
-                <div className="flex items-center gap-2 text-blue-700 font-extrabold text-sm">
-                  <CreditCard className="h-4 w-4" />
-                  <span>Kartu Kredit (Cicilan 0%)</span>
-                </div>
-                <select
-                  value={selectedBankId}
-                  onChange={(e) => setSelectedBankId(e.target.value)}
-                  className="w-full rounded-xl border border-slate-300 bg-slate-50 px-3 py-2 text-xs font-bold"
-                >
-                  {bankPromos.map((b) => (
-                    <option key={b.Bank_ID} value={b.Bank_ID}>
-                      {b.Nama_Bank}
-                    </option>
-                  ))}
-                </select>
-                <div className="divide-y divide-slate-100">
-                  {activeBank.Tenor_Tersedia.map((tenor) => (
-                    <div key={tenor} className="py-2.5 flex items-center justify-between text-xs">
-                      <span className="font-bold text-slate-600">{tenor} Bulan (0%)</span>
-                      <span className="text-sm font-black text-slate-900">
-                        {formatRupiah(calcMonthlyInstallment(netPayable, tenor, 0))}
-                        <span className="text-[11px] font-normal text-slate-400">/bln</span>
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* BNPL Card */}
-              <div className="rounded-2xl bg-white border border-slate-200 p-5 space-y-3 shadow-sm">
-                <div className="flex items-center gap-2 text-purple-700 font-extrabold text-sm">
-                  <Wallet className="h-4 w-4" />
-                  <span>BNPL / PayLater Tanpa Kartu</span>
-                </div>
-                <select
-                  value={selectedBnplId}
-                  onChange={(e) => setSelectedBnplId(e.target.value)}
-                  className="w-full rounded-xl border border-slate-300 bg-slate-50 px-3 py-2 text-xs font-bold"
-                >
-                  {bnplProviders.map((p) => (
-                    <option key={p.BNPL_ID} value={p.BNPL_ID}>
-                      {p.Nama_Provider} (Bunga est. {p.Bunga_Bulanan_Pct}%/bln)
-                    </option>
-                  ))}
-                </select>
-                <div className="divide-y divide-slate-100">
-                  {activeBnpl.Tenor_Tersedia.map((tenor) => (
-                    <div key={tenor} className="py-2.5 flex items-center justify-between text-xs">
-                      <span className="font-bold text-slate-600">{tenor} Bulan</span>
-                      <span className="text-sm font-black text-purple-800">
-                        {formatRupiah(
-                          calcMonthlyInstallment(
-                            netPayable,
-                            tenor,
-                            activeBnpl.Bunga_Bulanan_Pct,
-                            activeBnpl.Biaya_Admin
-                          )
-                        )}
-                        <span className="text-[11px] font-normal text-slate-400">/bln</span>
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
+            <div>
+              <label className="block text-[11px] text-slate-500 mb-1">
+                Redeem MAPCLUB (Rp)
+              </label>
+              <input
+                type="number"
+                step={10000}
+                value={mapclubPoints || ""}
+                placeholder="0"
+                onChange={(e) => setMapclubPoints(Number(e.target.value))}
+                className="w-full rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-xs font-semibold"
+              />
             </div>
           </div>
         </div>
-      )}
 
-      {/* MODE B: 3-ZONE MINI-ETP CART & CHECKOUT ENGINE */}
-      {mode === "CART_ETP" && (
-        <div className="grid grid-cols-1 xl:grid-cols-12 gap-5">
-          {/* ZONE 1: DAFTAR BELANJA & QUICK ADD (5 Cols) */}
-          <div className="xl:col-span-5 rounded-2xl bg-white border border-slate-200 p-5 space-y-4 shadow-sm flex flex-col justify-between">
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-extrabold text-slate-900 uppercase tracking-wider">
-                  Zona 1 • Item Keranjang Mini-ETP
-                </h3>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={onOpenBarcodeModal}
-                    className="inline-flex items-center gap-1 rounded-lg bg-blue-50 border border-blue-200 px-2.5 py-1 text-xs font-bold text-blue-700 hover:bg-blue-100"
-                  >
-                    <ScanBarcode className="h-3.5 w-3.5" /> Scan
-                  </button>
-                  {cart.length > 0 && (
-                    <button
-                      onClick={onClearCart}
-                      className="text-xs font-semibold text-rose-600 hover:underline"
-                    >
-                      Reset
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {/* Quick Add Selectors */}
-              <div className="rounded-xl bg-slate-50 border border-slate-200 p-3 space-y-2.5 text-xs">
-                <div className="flex gap-1.5">
-                  <select
-                    value={quickDeviceSelect}
-                    onChange={(e) => setQuickDeviceSelect(e.target.value)}
-                    className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 font-semibold"
-                  >
-                    {devices.map((d) => (
-                      <option key={d.Device_ID} value={d.Device_ID}>
-                        {d.Model_Varian} ({d.Storage}) — {formatRupiah(d.Harga_SRP_Promo)}
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    onClick={() => {
-                      const d = devices.find((x) => x.Device_ID === quickDeviceSelect);
-                      if (d) onAddDeviceToCart(d);
-                    }}
-                    className="rounded-lg bg-slate-900 px-3 py-1.5 font-bold text-white shrink-0 hover:bg-blue-600"
-                  >
-                    + Unit
-                  </button>
-                </div>
-
-                <div className="flex gap-1.5">
-                  <select
-                    value={quickAccSelect}
-                    onChange={(e) => setQuickAccSelect(e.target.value)}
-                    className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 font-semibold"
-                  >
-                    {accessories.map((a) => (
-                      <option key={a.Acc_ID} value={a.Acc_ID}>
-                        [{a.Merek}] {a.Nama_Produk} — {formatRupiah(a.Harga_Promo)}
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    onClick={() => {
-                      const a = accessories.find((x) => x.Acc_ID === quickAccSelect);
-                      if (a) onAddAccToCart(a);
-                    }}
-                    className="rounded-lg bg-blue-600 px-3 py-1.5 font-bold text-white shrink-0 hover:bg-blue-700"
-                  >
-                    + Aksesoris
-                  </button>
-                </div>
-
-                {/* Quick Qoala Button */}
-                {suggestedQoala && (
-                  <div className="flex items-center justify-between pt-1 border-t border-slate-200">
-                    <span className="text-[11px] font-semibold text-emerald-700 flex items-center gap-1">
-                      <ShieldCheck className="h-3.5 w-3.5" /> {suggestedQoala.Tier_ID}
-                    </span>
-                    <div className="flex gap-1.5">
-                      <button
-                        onClick={() => onAddQoalaToCart(suggestedQoala, 12)}
-                        className="rounded bg-emerald-600 px-2 py-1 text-[11px] font-bold text-white"
-                      >
-                        + Qoala 12B ({formatRupiah(suggestedQoala.Premi_12_Bln)})
-                      </button>
-                      <button
-                        onClick={() => onAddQoalaToCart(suggestedQoala, 24)}
-                        className="rounded bg-emerald-800 px-2 py-1 text-[11px] font-bold text-white"
-                      >
-                        + 24B
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Cart Items List */}
-              {cart.length === 0 ? (
-                <div className="rounded-xl border-2 border-dashed border-slate-200 p-8 text-center text-xs text-slate-400">
-                  Keranjang simulasi masih kosong. Pilih unit dari{" "}
-                  <strong>Comparison Matrix</strong>, <strong>E-Catalog</strong>, atau tombol{" "}
-                  <strong>+ Unit</strong> di atas.
-                </div>
-              ) : (
-                <div className="space-y-2.5 max-h-[340px] overflow-y-auto pr-1">
-                  {cart.map((item) => (
-                    <div
-                      key={item.id}
-                      className="rounded-xl border border-slate-200 bg-slate-50/70 p-3 flex items-center justify-between gap-2"
-                    >
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-1.5">
-                          <span className="rounded bg-slate-800 px-1.5 py-0.5 text-[9px] font-mono font-bold text-white">
-                            {item.sku}
-                          </span>
-                          {item.bestSeller && (
-                            <span className="rounded bg-amber-500 px-1.5 py-0.5 text-[9px] font-black text-slate-950">
-                              BEST SELLER
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-xs font-extrabold text-slate-900 truncate mt-1">
-                          {item.name}
-                        </p>
-                        <p className="text-xs font-bold text-blue-700">
-                          {formatRupiah(item.price * item.qty)}
-                        </p>
-                      </div>
-
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        <button
-                          onClick={() => onUpdateQty(item.id, -1)}
-                          className="rounded-lg border border-slate-300 bg-white p-1 hover:bg-slate-100"
-                        >
-                          <Minus className="h-3 w-3" />
-                        </button>
-                        <span className="w-5 text-center text-xs font-bold">{item.qty}</span>
-                        <button
-                          onClick={() => onUpdateQty(item.id, 1)}
-                          className="rounded-lg border border-slate-300 bg-white p-1 hover:bg-slate-100"
-                        >
-                          <Plus className="h-3 w-3" />
-                        </button>
-                        <button
-                          onClick={() => onRemoveItem(item.id)}
-                          className="rounded-lg p-1 text-rose-500 hover:bg-rose-50 ml-1"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Manual Custom Item Adder */}
-            <div className="pt-3 border-t border-slate-200">
-              <p className="text-[11px] font-bold text-slate-500 mb-1.5">
-                Tambah Item Manual / Promo Khusus Toko:
-              </p>
-              <div className="grid grid-cols-12 gap-1.5 text-xs">
-                <input
-                  type="text"
-                  placeholder="Nama Item"
-                  value={manualName}
-                  onChange={(e) => setManualName(e.target.value)}
-                  className="col-span-5 rounded-lg border border-slate-300 px-2 py-1.5"
-                />
-                <input
-                  type="text"
-                  placeholder="SKU"
-                  value={manualSku}
-                  onChange={(e) => setManualSku(e.target.value)}
-                  className="col-span-3 rounded-lg border border-slate-300 px-2 py-1.5"
-                />
-                <input
-                  type="number"
-                  placeholder="Harga"
-                  value={manualPrice || ""}
-                  onChange={(e) => setManualPrice(Number(e.target.value) || 0)}
-                  className="col-span-3 rounded-lg border border-slate-300 px-2 py-1.5"
-                />
-                <button
-                  onClick={() => {
-                    if (manualName && manualPrice > 0) {
-                      onAddManualItem(manualName, manualSku || "MANUAL-SKU", manualPrice);
-                      setManualName("");
-                      setManualSku("");
-                      setManualPrice(0);
-                    }
-                  }}
-                  className="col-span-1 rounded-lg bg-slate-800 text-white font-bold flex items-center justify-center"
-                >
-                  +
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {/* ZONE 2: TRADE-IN LAKU6, VOUCHER & SPLIT PAYMENT (3 Cols) */}
-          <div className="xl:col-span-3 rounded-2xl bg-white border border-slate-200 p-5 space-y-4 shadow-sm">
-            <h3 className="text-sm font-extrabold text-slate-900 uppercase tracking-wider">
-              Zona 2 • Potongan & Laku6
+        {/* Payment Scheme & Split Payment */}
+        <div className="bg-white dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm space-y-3.5">
+          <div className="flex items-center gap-2">
+            <CreditCard className="w-4 h-4 text-indigo-500" />
+            <h3 className="text-sm font-extrabold">
+              2C. Skema Pembayaran &amp; Split DP
             </h3>
-
-            {/* Trade-In Laku6 */}
-            <div className="rounded-xl bg-amber-50 border border-amber-200 p-3.5 space-y-2.5">
-              <div className="flex items-center gap-1.5 text-xs font-extrabold text-amber-900">
-                <RefreshCw className="h-3.5 w-3.5 text-amber-600" />
-                <span>Trade-In Laku6 (Mau Jual)</span>
-              </div>
-              <select
-                value={selectedTradeInId}
-                onChange={(e) => setSelectedTradeInId(e.target.value)}
-                className="w-full rounded-lg border border-amber-300 bg-white px-2.5 py-2 text-xs font-semibold"
-              >
-                <option value="">-- Tidak Ada Trade-In --</option>
-                {tradeInDevices.map((t) => (
-                  <option key={t.TradeIn_ID} value={t.TradeIn_ID}>
-                    {t.Tipe_Device_Lama}
-                  </option>
-                ))}
-              </select>
-
-              {selectedTradeInId && (
-                <>
-                  <div className="grid grid-cols-3 gap-1.5">
-                    {(["A", "B", "C"] as const).map((g) => (
-                      <button
-                        key={g}
-                        onClick={() => setTradeInGrade(g)}
-                        className={`rounded-lg py-1.5 text-xs font-bold border ${
-                          tradeInGrade === g
-                            ? "bg-amber-600 text-white border-amber-600"
-                            : "bg-white text-slate-700 border-slate-300"
-                        }`}
-                      >
-                        Grade {g}
-                      </button>
-                    ))}
-                  </div>
-                  <div className="text-[11px] bg-white rounded-lg p-2 border border-amber-200 space-y-0.5">
-                    <div className="flex justify-between">
-                      <span className="text-slate-500">Taksiran HP:</span>
-                      <span className="font-bold">{formatRupiah(tradeInValuation.base)}</span>
-                    </div>
-                    <div className="flex justify-between text-emerald-700">
-                      <span>Bonus Top-Up:</span>
-                      <span className="font-bold">+{formatRupiah(tradeInValuation.bonus)}</span>
-                    </div>
-                    <div className="flex justify-between font-extrabold text-slate-900 pt-1 border-t">
-                      <span>Total Potongan:</span>
-                      <span>-{formatRupiah(tradeInValuation.total)}</span>
-                    </div>
-                  </div>
-                </>
-              )}
-            </div>
-
-            <div className="space-y-3 text-xs">
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">
-                  Promo / Cashback Bank (Rp)
-                </label>
-                <input
-                  type="number"
-                  value={bankCashback || ""}
-                  placeholder="0"
-                  onChange={(e) => setBankCashback(Number(e.target.value) || 0)}
-                  className="w-full rounded-xl border border-slate-300 px-3 py-2 font-bold"
-                />
-              </div>
-
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">
-                  Voucher Toko / Gift Voucher (Rp)
-                </label>
-                <input
-                  type="number"
-                  value={storeVoucher || ""}
-                  placeholder="0"
-                  onChange={(e) => setStoreVoucher(Number(e.target.value) || 0)}
-                  className="w-full rounded-xl border border-slate-300 px-3 py-2 font-bold"
-                />
-              </div>
-
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">
-                  Redeem Poin MAPCLUB (1 Poin = Rp 1)
-                </label>
-                <input
-                  type="number"
-                  value={mapclubPoints || ""}
-                  placeholder="0"
-                  onChange={(e) => setMapclubPoints(Number(e.target.value) || 0)}
-                  className="w-full rounded-xl border border-slate-300 px-3 py-2 font-bold"
-                />
-              </div>
-
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">
-                  DP / Split Payment Tunai-Debit-QRIS (Rp)
-                </label>
-                <input
-                  type="number"
-                  value={splitDpCash || ""}
-                  placeholder="0"
-                  onChange={(e) => setSplitDpCash(Number(e.target.value) || 0)}
-                  className="w-full rounded-xl border border-slate-300 px-3 py-2 font-bold"
-                />
-              </div>
-            </div>
           </div>
 
-          {/* ZONE 3: GRAND TOTAL, SKEMA CICILAN & HANDOVER KASIR ETP (4 Cols) */}
-          <div className="xl:col-span-4 rounded-2xl bg-slate-900 text-white p-5 space-y-4 shadow-xl flex flex-col justify-between">
-            <div className="space-y-4">
-              <h3 className="text-sm font-extrabold text-blue-300 uppercase tracking-wider">
-                Zona 3 • Ringkasan & Cicilan
-              </h3>
+          <div className="grid grid-cols-3 gap-1.5">
+            {(
+              [
+                { key: "FULL", label: "Full Pay" },
+                { key: "CC_0", label: "Cicilan 0%" },
+                { key: "BNPL", label: "BNPL" },
+              ] as const
+            ).map((m) => (
+              <button
+                key={m.key}
+                type="button"
+                onClick={() => setPaymentMethod(m.key)}
+                className={`py-2 rounded-xl text-xs font-bold border transition ${
+                  paymentMethod === m.key
+                    ? "bg-indigo-600 text-white border-indigo-600"
+                    : "bg-slate-100 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300"
+                }`}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
 
-              {/* Grand Total Summary Box */}
-              <div className="rounded-xl bg-white/10 border border-white/15 p-4 space-y-1.5 text-xs">
-                <div className="flex justify-between text-slate-300">
-                  <span>Subtotal Belanja ({cart.reduce((s, i) => s + i.qty, 0)} item):</span>
-                  <span className="font-bold text-white">{formatRupiah(cartSubtotal)}</span>
-                </div>
-                <div className="flex justify-between text-amber-300">
-                  <span>Total Pengurang (Trade-In + Promo + DP):</span>
-                  <span className="font-bold">-{formatRupiah(totalDeductions)}</span>
-                </div>
-                <div className="pt-2 border-t border-white/15 flex items-baseline justify-between">
-                  <span className="text-xs font-bold uppercase text-slate-300">
-                    Sisa Tagihan (Net):
-                  </span>
-                  <span className="text-2xl font-black text-emerald-400">
-                    {formatRupiah(netPayable)}
-                  </span>
-                </div>
-              </div>
-
-              {/* Payment Method Tabs */}
-              <div className="grid grid-cols-3 gap-1 rounded-xl bg-slate-800 p-1 text-xs">
-                <button
-                  onClick={() => setPayMethodTab("CC")}
-                  className={`rounded-lg py-2 font-bold flex items-center justify-center gap-1 transition ${
-                    payMethodTab === "CC" ? "bg-blue-600 text-white" : "text-slate-400"
-                  }`}
-                >
-                  <CreditCard className="h-3.5 w-3.5" /> CC 0%
-                </button>
-                <button
-                  onClick={() => setPayMethodTab("BNPL")}
-                  className={`rounded-lg py-2 font-bold flex items-center justify-center gap-1 transition ${
-                    payMethodTab === "BNPL" ? "bg-purple-600 text-white" : "text-slate-400"
-                  }`}
-                >
-                  <Wallet className="h-3.5 w-3.5" /> BNPL
-                </button>
-                <button
-                  onClick={() => setPayMethodTab("CASH")}
-                  className={`rounded-lg py-2 font-bold flex items-center justify-center gap-1 transition ${
-                    payMethodTab === "CASH" ? "bg-emerald-600 text-white" : "text-slate-400"
-                  }`}
-                >
-                  <Banknote className="h-3.5 w-3.5" /> Cash/QRIS
-                </button>
-              </div>
-
-              {/* CC 0% Breakdown */}
-              {payMethodTab === "CC" && (
-                <div className="space-y-2.5 text-xs">
-                  <select
-                    value={selectedBankId}
-                    onChange={(e) => setSelectedBankId(e.target.value)}
-                    className="w-full rounded-xl bg-slate-800 border border-slate-700 px-3 py-2 font-bold text-white"
-                  >
-                    {bankPromos.map((b) => (
-                      <option key={b.Bank_ID} value={b.Bank_ID}>
-                        {b.Nama_Bank}
-                      </option>
-                    ))}
-                  </select>
-                  <p className="text-[11px] text-blue-300">{activeBank.Catatan_Promo}</p>
-
-                  <div className="rounded-xl bg-slate-800/80 border border-slate-700 divide-y divide-slate-700/80">
-                    {activeBank.Tenor_Tersedia.map((tenor) => (
-                      <div key={tenor} className="px-3.5 py-2.5 flex items-center justify-between">
-                        <span className="font-semibold text-slate-300">{tenor} Bulan (0%)</span>
-                        <span className="text-sm font-black text-white">
-                          {formatRupiah(calcMonthlyInstallment(netPayable, tenor, 0))}
-                          <span className="text-[11px] font-normal text-slate-400">/bln</span>
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* BNPL Breakdown */}
-              {payMethodTab === "BNPL" && (
-                <div className="space-y-2.5 text-xs">
-                  <select
-                    value={selectedBnplId}
-                    onChange={(e) => setSelectedBnplId(e.target.value)}
-                    className="w-full rounded-xl bg-slate-800 border border-slate-700 px-3 py-2 font-bold text-white"
-                  >
-                    {bnplProviders.map((p) => (
-                      <option key={p.BNPL_ID} value={p.BNPL_ID}>
-                        {p.Nama_Provider} (Est. {p.Bunga_Bulanan_Pct}%/bln)
-                      </option>
-                    ))}
-                  </select>
-
-                  <div className="rounded-xl bg-slate-800/80 border border-slate-700 divide-y divide-slate-700/80">
-                    {activeBnpl.Tenor_Tersedia.map((tenor) => (
-                      <div key={tenor} className="px-3.5 py-2.5 flex items-center justify-between">
-                        <span className="font-semibold text-slate-300">{tenor} Bulan</span>
-                        <span className="text-sm font-black text-purple-300">
-                          {formatRupiah(
-                            calcMonthlyInstallment(
-                              netPayable,
-                              tenor,
-                              activeBnpl.Bunga_Bulanan_Pct,
-                              activeBnpl.Biaya_Admin
-                            )
-                          )}
-                          <span className="text-[11px] font-normal text-slate-400">/bln</span>
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* CASH / DEBIT / QRIS */}
-              {payMethodTab === "CASH" && (
-                <div className="rounded-xl bg-emerald-950/60 border border-emerald-700/60 p-4 space-y-2 text-xs">
-                  <p className="font-bold text-emerald-300">Pembayaran Penuh Tunai / Debit / QRIS</p>
-                  <p className="text-slate-300">
-                    Total yang dibayarkan di kasir ETP:{" "}
-                    <strong className="text-white">{formatRupiah(netPayable)}</strong>
-                  </p>
-                  <p className="text-amber-300 font-semibold">
-                    Estimasi Tambahan Poin MAPCLUB: +{Math.floor(netPayable / 1000).toLocaleString("id-ID")} Poin
-                  </p>
-                </div>
-              )}
-            </div>
-
-            {/* Handover to Cashier ETP Button */}
-            <button
-              disabled={cart.length === 0}
-              onClick={() => setShowEtpModal(true)}
-              className="w-full rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:bg-slate-700 disabled:text-slate-500 py-3.5 px-4 text-sm font-black text-slate-950 shadow-lg flex items-center justify-center gap-2 transition"
+          {paymentMethod === "BNPL" && bnplProviders.length > 0 && (
+            <select
+              value={selectedBnplId}
+              onChange={(e) => setSelectedBnplId(e.target.value)}
+              className="w-full rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-3 py-2 text-xs"
             >
-              <Receipt className="h-4 w-4" />
-              <span>Proses ke Kasir — Tampilkan Kode SKU ETP</span>
-            </button>
+              {bnplProviders.map((p: any, idx: number) => {
+                const key = String(p.BNPL_ID || p.Nama_Provider || idx);
+                return (
+                  <option key={key} value={key}>
+                    {p.Nama_Provider || p.Provider}
+                  </option>
+                );
+              })}
+            </select>
+          )}
+
+          {paymentMethod !== "FULL" && (
+            <div className="grid grid-cols-4 gap-1.5">
+              {[3, 6, 12, 24].map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => setTenor(t)}
+                  className={`py-1.5 rounded-lg text-xs font-bold border ${
+                    tenor === t
+                      ? "bg-blue-600 text-white border-blue-600"
+                      : "bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700"
+                  }`}
+                >
+                  {t} Bln
+                </button>
+              ))}
+            </div>
+          )}
+
+          <div className="pt-1 flex items-center justify-between text-xs">
+            <span className="text-slate-500">Split Payment (DP Tunai/Debit):</span>
+            <input
+              type="number"
+              step={500000}
+              value={splitDpCash || ""}
+              placeholder="0"
+              onChange={(e) => setSplitDpCash(Number(e.target.value))}
+              className="w-36 rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-2.5 py-1 text-right font-semibold"
+            />
           </div>
         </div>
-      )}
+      </div>
 
-      {/* ETP CASHIER HANDOVER MODAL */}
-      {showEtpModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/75 backdrop-blur-sm p-4">
-          <div className="w-full max-w-xl rounded-2xl bg-white shadow-2xl border border-slate-200 overflow-hidden">
-            <div className="bg-slate-900 px-6 py-4 text-white flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <CheckCircle2 className="h-5 w-5 text-emerald-400" />
-                <div>
-                  <h3 className="text-base font-extrabold">Ringkasan Kode Artikel (SKU) Kasir ETP</h3>
-                  <p className="text-xs text-slate-400">
-                    Tunjukkan layar ini ke kasir untuk input transaksi ETP
-                  </p>
-                </div>
+      {/* ZONA 3: RINGKASAN PEMBAYARAN & MINI-ETP CASHIER SCREEN (3 COLS) */}
+      <div className="xl:col-span-3 space-y-4">
+        <div className="bg-gradient-to-b from-slate-900 to-slate-950 text-white border border-slate-800 rounded-2xl p-5 shadow-lg space-y-4">
+          <div className="flex items-center gap-2 border-b border-slate-800 pb-3">
+            <Calculator className="w-5 h-5 text-blue-400" />
+            <h3 className="text-sm font-extrabold uppercase tracking-wider">
+              3. Layar Kasir Mini-ETP
+            </h3>
+          </div>
+
+          {/* Breakdown Numbers */}
+          <div className="space-y-2 text-xs">
+            <div className="flex justify-between text-slate-400">
+              <span>Subtotal Keranjang</span>
+              <span className="font-semibold text-white">{formatIDR(subtotal)}</span>
+            </div>
+            {tradeInValue > 0 && (
+              <div className="flex justify-between text-emerald-400">
+                <span>Trade-In Laku6 ({tradeInGrade})</span>
+                <span>-{formatIDR(tradeInValue)}</span>
               </div>
-              <button
-                onClick={() => setShowEtpModal(false)}
-                className="rounded-lg p-1 text-slate-400 hover:text-white"
-              >
-                <X className="h-5 w-5" />
-              </button>
+            )}
+            {bankDiscount > 0 && (
+              <div className="flex justify-between text-blue-400">
+                <span>Promo Bank</span>
+                <span>-{formatIDR(bankDiscount)}</span>
+              </div>
+            )}
+            {voucherAmount > 0 && (
+              <div className="flex justify-between text-amber-400">
+                <span>Voucher</span>
+                <span>-{formatIDR(voucherAmount)}</span>
+              </div>
+            )}
+            {mapclubPoints > 0 && (
+              <div className="flex justify-between text-purple-400">
+                <span>Redeem MAPCLUB</span>
+                <span>-{formatIDR(mapclubPoints)}</span>
+              </div>
+            )}
+
+            <div className="pt-2.5 border-t border-slate-800 flex justify-between items-baseline">
+              <span className="font-bold text-slate-300">Total Bayar Net</span>
+              <span className="text-lg font-extrabold text-emerald-400">
+                {formatIDR(netPayable)}
+              </span>
             </div>
 
-            <div className="p-6 space-y-4 max-h-[80vh] overflow-y-auto text-xs">
-              <div className="rounded-xl border border-slate-200 overflow-hidden">
-                <table className="w-full text-left border-collapse">
-                  <thead className="bg-slate-100 border-b border-slate-200">
-                    <tr>
-                      <th className="p-3 font-extrabold text-slate-700">Kode SKU / Artikel</th>
-                      <th className="p-3 font-extrabold text-slate-700">Nama Produk</th>
-                      <th className="p-3 font-extrabold text-slate-700 text-center">Qty</th>
-                      <th className="p-3 font-extrabold text-slate-700 text-right">Subtotal</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {cart.map((item) => (
-                      <tr key={item.id}>
-                        <td className="p-3 font-mono font-bold text-blue-700">{item.sku}</td>
-                        <td className="p-3 font-semibold text-slate-900">{item.name}</td>
-                        <td className="p-3 text-center font-bold">{item.qty}</td>
-                        <td className="p-3 text-right font-bold">
-                          {formatRupiah(item.price * item.qty)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+            {splitDpCash > 0 && (
+              <div className="flex justify-between text-slate-300">
+                <span>DP Cash / Debit</span>
+                <span className="font-bold">{formatIDR(splitDpCash)}</span>
               </div>
+            )}
+          </div>
 
-              <div className="rounded-xl bg-slate-50 border border-slate-200 p-4 space-y-1.5">
-                <div className="flex justify-between">
-                  <span className="text-slate-500">Subtotal Item:</span>
-                  <span className="font-bold">{formatRupiah(cartSubtotal)}</span>
-                </div>
-                {tradeInValuation.total > 0 && (
-                  <div className="flex justify-between text-amber-700">
-                    <span>Trade-In Laku6 ({tradeInValuation.label}):</span>
-                    <span className="font-bold">-{formatRupiah(tradeInValuation.total)}</span>
-                  </div>
-                )}
-                {bankCashback > 0 && (
-                  <div className="flex justify-between text-emerald-700">
-                    <span>Promo / Cashback Bank:</span>
-                    <span className="font-bold">-{formatRupiah(bankCashback)}</span>
-                  </div>
-                )}
-                {storeVoucher > 0 && (
-                  <div className="flex justify-between text-emerald-700">
-                    <span>Voucher Toko:</span>
-                    <span className="font-bold">-{formatRupiah(storeVoucher)}</span>
-                  </div>
-                )}
-                {mapclubPoints > 0 && (
-                  <div className="flex justify-between text-emerald-700">
-                    <span>Redeem Poin MAPCLUB:</span>
-                    <span className="font-bold">-{formatRupiah(mapclubPoints)}</span>
-                  </div>
-                )}
-                {splitDpCash > 0 && (
-                  <div className="flex justify-between text-blue-700">
-                    <span>Split Payment Awal (Cash/Debit/QRIS):</span>
-                    <span className="font-bold">-{formatRupiah(splitDpCash)}</span>
-                  </div>
-                )}
-                <div className="flex justify-between text-base font-black text-slate-900 pt-2 border-t border-slate-200">
-                  <span>SISA PEMBIAYAAN ({payMethodTab}):</span>
-                  <span className="text-blue-700">{formatRupiah(netPayable)}</span>
-                </div>
-              </div>
-
-              <button
-                onClick={() => setShowEtpModal(false)}
-                className="w-full rounded-xl bg-slate-900 py-3 font-bold text-white hover:bg-slate-800"
-              >
-                Tutup Layar SKU
-              </button>
+          {/* Monthly Installment Highlight */}
+          <div className="p-3.5 rounded-xl bg-blue-600/20 border border-blue-500/40">
+            <div className="text-[11px] text-blue-300 font-semibold">
+              {paymentMethod === "FULL"
+                ? "Pembayaran Penuh (1x)"
+                : paymentMethod === "CC_0"
+                ? `Estimasi Cicilan 0% (${tenor} Bulan)`
+                : `Estimasi Cicilan BNPL (${tenor} Bulan)`}
+            </div>
+            <div className="text-xl font-black text-white mt-0.5">
+              {formatIDR(monthlyInstallment)}
+              {paymentMethod !== "FULL" && (
+                <span className="text-xs font-normal text-blue-200"> /bln</span>
+              )}
             </div>
           </div>
+
+          {/* SAP Article / SKU List for Cashier Input */}
+          <div className="space-y-2 pt-1">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold uppercase text-slate-400">
+                Daftar Kode SKU ETP ({cart.length})
+              </span>
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+            </div>
+
+            <div className="space-y-1.5 max-h-48 overflow-y-auto">
+              {cart.map((item) => (
+                <div
+                  key={item.id}
+                  className="p-2 rounded-lg bg-white/5 border border-white/10 flex items-center justify-between gap-2"
+                >
+                  <div className="min-w-0">
+                    <div className="font-mono text-[11px] font-bold text-amber-300 truncate">
+                      {item.sku}
+                    </div>
+                    <div className="text-[10px] text-slate-400 truncate">
+                      {item.name} (x{item.qty})
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleCopySku(item.sku)}
+                    className="p-1.5 rounded bg-white/10 hover:bg-blue-600 text-white shrink-0"
+                    title="Salin SKU ETP"
+                  >
+                    {copiedSku === item.sku ? (
+                      <Check className="w-3.5 h-3.5 text-emerald-400" />
+                    ) : (
+                      <Copy className="w-3.5 h-3.5" />
+                    )}
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleCopyEtpSummary}
+            className="w-full py-2.5 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-extrabold flex items-center justify-center gap-2 transition shadow"
+          >
+            {copiedSummary ? (
+              <>
+                <Check className="w-4 h-4" />
+                Ringkasan Kasir Tersalin!
+              </>
+            ) : (
+              <>
+                <Copy className="w-4 h-4" />
+                Salin Semua Ringkasan ETP
+              </>
+            )}
+          </button>
         </div>
-      )}
+      </div>
     </div>
   );
 }
